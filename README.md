@@ -1,5 +1,9 @@
 # forge-tasks
 
+[![CI](https://github.com/azmi2409/forge-tasks/actions/workflows/ci.yml/badge.svg)](https://github.com/azmi2409/forge-tasks/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/badge/go-1.27-blue)](https://go.dev)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Jira, rebuilt for AI agents.
 
 An open-source project management system designed agent-first: work items are
