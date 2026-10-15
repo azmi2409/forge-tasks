@@ -32,6 +32,8 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - forge
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-forge} -d ${POSTGRES_DB:-forge_tasks}"]
       interval: 5s
@@ -52,6 +54,8 @@ services:
       PORT: "8080"
     ports:
       - "${API_PORT:-8080}:8080"
+    networks:
+      - forge
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz | grep -q '\"status\":\"ok\"'"]
       interval: 10s
@@ -71,6 +75,12 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@postgres:5432/${POSTGRES_DB:-forge_tasks}?sslmode=disable}
     stdin_open: true
     profiles: ["tools"]
+    networks:
+      - forge
+
+networks:
+  forge:
+    driver: bridge
 
 volumes:
   pgdata:
