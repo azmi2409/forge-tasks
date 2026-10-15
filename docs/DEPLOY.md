@@ -60,6 +60,16 @@ Tear down **including** data:
 docker compose down -v
 ```
 
+## Deploying on Coolify
+
+Import the repo as a Docker Compose resource and deploy. If the deploy fails
+with `Bind for :::8080 failed: port is already allocated`, another app on the
+host already owns port 8080 — set a free host port in the resource's
+environment variables, e.g. `API_PORT=18080`, and redeploy. Only the host
+side of the mapping changes; the container still listens on 8080 internally,
+so the healthcheck keeps working. Same trick applies to Postgres
+(`POSTGRES_PORT`) if 5432 is taken.
+
 ## Production notes
 
 - Put Postgres behind your private network; don't expose 5432 publicly.
