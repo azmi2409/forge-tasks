@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Item.Key}} — forge-tasks</title>
+<style>
+  :root { --bg: #0f1115; --panel: #171a21; --text: #e6e8ec; --dim: #9aa0ab;
+          --line: #262b36; --accent: #6ea8fe; --red: #ff7b72; --green: #7fe0a8; }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif;
+         margin: 0; padding: 24px; max-width: 900px; }
+  a { color: var(--accent); text-decoration: none; }
+  .back { color: var(--dim); font-size: 13px; }
+  h1 { font-size: 22px; margin: 8px 0 4px; }
+  .key { font-family: ui-monospace, monospace; color: var(--dim); }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; }
+  .st-todo { background: #2a2f3a; color: #c7cdd8; }
+  .st-doing { background: #1d3a5f; color: #8fc1ff; }
+  .st-done { background: #1d4d33; color: #7fe0a8; }
+  .st-other { background: #3a2f2a; color: #e0b07f; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+          padding: 16px; margin: 16px 0; }
+  .card h2 { font-size: 14px; margin: 0 0 12px; color: var(--dim);
+             text-transform: uppercase; letter-spacing: .04em; }
+  .meta { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; }
+  .meta dt { color: var(--dim); } .meta dd { margin: 0; }
+  .crit { display: flex; gap: 8px; align-items: baseline; padding: 6px 0;
+          border-bottom: 1px solid var(--line); }
+  .crit:last-child { border-bottom: none; }
+  .pill { font-size: 11px; padding: 1px 8px; border-radius: 12px; white-space: nowrap; }
+  .passed { background: #1d4d33; color: var(--green); }
+  .pending { background: #2a2f3a; color: #c7cdd8; }
+  .failed { background: #5f1d1d; color: var(--red); }
+  .trans { display: flex; gap: 8px; flex-wrap: wrap; }
+  button { background: #1d3a5f; color: #cfe4ff; border: 1px solid #2c4d7a;
+           border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px; }
+  button:hover { background: #244a75; }
+  .blocked { background: #2a1518; border: 1px solid #5f2b2b; border-radius: 8px;
+             padding: 12px 16px; margin: 16px 0; }
+  .blocked code { color: var(--red); }
+  .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+  pre { background: #0c0e12; border: 1px solid var(--line); border-radius: 6px;
+        padding: 12px; overflow-x: auto; font-size: 12px; max-height: 300px; overflow-y: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  th { color: var(--dim); font-size: 12px; text-transform: uppercase; }
+</style>
+</head>
+<body>
+  <a class="back" href="/">&larr; all work</a>
+  <h1><span class="key">{{.Item.Key}}</span> {{.Item.Title}}</h1>
+  <div><span class="badge {{statusClass .Item.Status}}">{{.Item.Status}}</span>
+       <span class="key">v{{.Item.Version}}</span></div>
+
+  {{if .Blocked}}
+  <div class="blocked">
+    <strong>Transition blocked:</strong> <code>{{.Blocked.Result.BlockedCode}}</code>
+    — {{.Blocked.Result.Message}}
+    {{if .Blocked.Result.Missing}}
+    <div>Missing criteria: {{range .Blocked.Result.Missing}}<code>{{.}}</code> {{end}}</div>
+    {{end}}
+    {{if .Blocked.Result.Available}}
+    <div>Available: {{range .Blocked.Result.Available}}<code>{{.}}</code> {{end}}</div>
+    {{end}}
+  </div>
+  {{end}}
+
+  <div class="card">
+    <h2>Transitions</h2>
+    {{if .Transitions}}
+    <div class="trans">
+      {{range .Transitions}}
+      <form method="post" action="/items/{{$.Item.Key}}/transition">
+        <input type="hidden" name="to" value="{{.To}}">
+        <input type="hidden" name="version" value="{{$.Version}}">
+        <button type="submit" title="{{if .RequireCriteriaMet}}requires all criteria met {{end}}{{if .Eval}}eval: {{.Eval.Name}}{{end}}">
+          &rarr; {{.To}}{{if .Eval}} &#9878;{{end}}
+        </button>
+      </form>
+      {{end}}
+    </div>
+    <div style="color:var(--dim); font-size:12px; margin-top:8px;">&#9878; = eval hook runs before this transition</div>
+    {{else}}
+    <div style="color:var(--dim)">No outgoing transitions (terminal state).</div>
+    {{end}}
+  </div>
+
+  <div class="card">
+    <h2>Details</h2>
+    <dl class="meta">
+      <dt>Project</dt><dd class="mono">{{.Item.ProjectKey}}</dd>
+      <dt>Type</dt><dd>{{.Item.IssueType}}</dd>
+      <dt>Priority</dt><dd>{{.Item.Priority}}</dd>
+      <dt>Assignee</dt><dd>{{if .Item.AssigneeID}}{{.Item.AssigneeID}}{{else}}—{{end}}</dd>
+      <dt>Labels</dt><dd>{{range .Item.Labels}}<code>{{.}}</code> {{else}}—{{end}}</dd>
+      <dt>Claim</dt><dd>{{if .Claim}}held by <code>{{.Claim.AgentID}}</code> until {{.Claim.ExpiresAt.Format "15:04:05"}}{{else}}unclaimed{{end}}</dd>
+      <dt>Updated</dt><dd>{{.Item.UpdatedAt.Format "2006-01-02 15:04:05"}}</dd>
+    </dl>
+    {{if .Item.Description}}<p>{{.Item.Description}}</p>{{end}}
+  </div>
+
+  <div class="card">
+    <h2>Acceptance criteria</h2>
+    {{range .Item.Acceptance}}
+    <div class="crit">
+      <span class="pill {{.Status}}">{{.Status}}</span>
+      <span><code>{{.ID}}</code> — {{.Description}}</span>
+    </div>
+    {{else}}
+    <div style="color:var(--dim)">None.</div>
+    {{end}}
+  </div>
+
+  {{if .Artifacts}}
+  <div class="card">
+    <h2>Artifacts</h2>
+    <table>
+      <tr><th>ID</th><th>Kind</th><th>Name</th><th>Ver</th><th>Size</th></tr>
+      {{range .Artifacts}}
+      <tr>
+        <td class="mono"><a href="/api/v1/artifacts/{{.ID}}">{{.ID}}</a></td>
+        <td><code>{{.Kind}}</code></td><td>{{.Name}}</td><td>v{{.Version}}</td><td>{{.Size}}</td>
+      </tr>
+      {{end}}
+    </table>
+  </div>
+  {{end}}
+
+  {{if .EvalRuns}}
+  <div class="card">
+    <h2>Eval history</h2>
+    {{range .EvalRuns}}
+    <div class="crit">
+      <span class="pill {{if .Passed}}passed{{else}}failed{{end}}">{{if .Passed}}pass{{else}}fail{{end}}</span>
+      <span><code>{{.HookName}}</code> <span class="mono">{{.Transition}}</span>
+        <span style="color:var(--dim)">{{.RanAt.Format "15:04:05"}}{{if .DryRun}} (dry run){{end}}</span></span>
+    </div>
+    {{if .Output}}<pre>{{.Output}}</pre>{{end}}
+    {{end}}
+  </div>
+  {{end}}
+</body>
+</html>

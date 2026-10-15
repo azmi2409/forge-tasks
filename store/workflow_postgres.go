@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/azmi2409/forge-tasks/bus"
 )
 
 const workflowColumns = `id, version, name, definition, created_at`
@@ -38,7 +40,12 @@ func (s *PostgresStore) CreateWorkflow(ctx context.Context, name string, definit
 		id, name, string(definition)); err != nil {
 		return StoredWorkflow{}, fmt.Errorf("store: insert workflow: %w", err)
 	}
-	return s.GetWorkflow(ctx, id, 1)
+	w, err := s.GetWorkflow(ctx, id, 1)
+	if err != nil {
+		return StoredWorkflow{}, err
+	}
+	s.publish(bus.TypeWorkflowCreated, w)
+	return w, nil
 }
 
 func (s *PostgresStore) UpdateWorkflow(ctx context.Context, id string, definition json.RawMessage) (StoredWorkflow, error) {
@@ -72,7 +79,12 @@ func (s *PostgresStore) UpdateWorkflow(ctx context.Context, id string, definitio
 	if err := tx.Commit(ctx); err != nil {
 		return StoredWorkflow{}, fmt.Errorf("store: commit workflow version: %w", err)
 	}
-	return s.GetWorkflow(ctx, id, maxVersion+1)
+	w, err := s.GetWorkflow(ctx, id, maxVersion+1)
+	if err != nil {
+		return StoredWorkflow{}, err
+	}
+	s.publish(bus.TypeWorkflowUpdated, w)
+	return w, nil
 }
 
 func (s *PostgresStore) GetWorkflow(ctx context.Context, id string, version int) (StoredWorkflow, error) {
@@ -150,6 +162,9 @@ func (s *PostgresStore) SetProjectWorkflow(ctx context.Context, projectKey, work
 		projectKey, workflowID, version); err != nil {
 		return fmt.Errorf("store: set project workflow: %w", err)
 	}
+	s.publish(bus.TypeProjectWorkflowSet, ProjectWorkflow{
+		ProjectKey: projectKey, WorkflowID: workflowID, Version: version,
+	})
 	return nil
 }
 
@@ -192,6 +207,7 @@ func (s *PostgresStore) RecordEvalRun(ctx context.Context, run EvalRun) (EvalRun
 	}
 	run.ID = id
 	run.RanAt = run.RanAt.UTC()
+	s.publish(bus.TypeEvalRunRecorded, run)
 	return run, nil
 }
 

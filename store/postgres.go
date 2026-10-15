@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/azmi2409/forge-tasks/bus"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,6 +25,24 @@ import (
 // same tables.
 type PostgresStore struct {
 	pool *pgxpool.Pool
+	mu   sync.RWMutex
+	bus  *bus.Bus
+}
+
+// SetBus attaches the event bus; mutations publish after commit.
+func (s *PostgresStore) SetBus(b *bus.Bus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bus = b
+}
+
+func (s *PostgresStore) publish(typ string, data any) {
+	s.mu.RLock()
+	b := s.bus
+	s.mu.RUnlock()
+	if b != nil {
+		b.Publish(typ, data)
+	}
 }
 
 // NewPostgresStore connects to Postgres and verifies the schema is present.
@@ -95,7 +115,34 @@ func (s *PostgresStore) CreateProject(ctx context.Context, p Project) error {
 		p.Key); err != nil {
 		return fmt.Errorf("store: pin default workflow: %w", err)
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	s.publish(bus.TypeProjectCreated, p)
+	return nil
+}
+
+func (s *PostgresStore) ListProjects(ctx context.Context) ([]Project, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, `SELECT key, name FROM projects ORDER BY key`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list projects: %w", err)
+	}
+	defer rows.Close()
+	var out []Project
+	for rows.Next() {
+		var p Project
+		if err := rows.Scan(&p.Key, &p.Name); err != nil {
+			return nil, fmt.Errorf("store: scan project: %w", err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list projects rows: %w", err)
+	}
+	return out, nil
 }
 
 func (s *PostgresStore) GetProject(ctx context.Context, key string) (Project, error) {
@@ -181,7 +228,12 @@ func (s *PostgresStore) CreateWorkItem(ctx context.Context, w WorkItem) (WorkIte
 		}
 		return WorkItem{}, fmt.Errorf("store: insert work item: %w", err)
 	}
-	return out.workItem()
+	created, err := out.workItem()
+	if err != nil {
+		return WorkItem{}, err
+	}
+	s.publish(bus.TypeWorkItemCreated, created)
+	return created, nil
 }
 
 func (s *PostgresStore) GetWorkItem(ctx context.Context, key string) (WorkItem, error) {
@@ -245,7 +297,12 @@ func (s *PostgresStore) UpdateWorkItem(ctx context.Context, w WorkItem) (WorkIte
 		}
 		return WorkItem{}, fmt.Errorf("%w: work item %s", ErrVersionConflict, w.Key)
 	}
-	return out.workItem()
+	updated, err := out.workItem()
+	if err != nil {
+		return WorkItem{}, err
+	}
+	s.publish(bus.TypeWorkItemUpdated, updated)
+	return updated, nil
 }
 
 func (s *PostgresStore) DeleteWorkItem(ctx context.Context, key string) error {
@@ -260,6 +317,7 @@ func (s *PostgresStore) DeleteWorkItem(ctx context.Context, key string) error {
 		return fmt.Errorf("%w: work item %s", ErrNotFound, key)
 	}
 	// Keys are never reallocated: key_counters keeps incrementing.
+	s.publish(bus.TypeWorkItemDeleted, map[string]any{"key": key})
 	return nil
 }
 

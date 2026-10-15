@@ -18,7 +18,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azmi2409/forge-tasks/bus"
+	"github.com/azmi2409/forge-tasks/service"
 	"github.com/azmi2409/forge-tasks/store"
+	"github.com/azmi2409/forge-tasks/ui"
 )
 
 // maxBodyBytes caps request bodies so one caller can't force large allocs.
@@ -35,6 +38,8 @@ type errorBody struct {
 // Server is the HTTP API over a store.Store.
 type Server struct {
 	store  store.Store
+	svc    *service.Service
+	bus    *bus.Bus
 	logger *slog.Logger
 	mux    *http.ServeMux
 }
@@ -44,9 +49,18 @@ func NewServer(st store.Store, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	s := &Server{store: st, logger: logger, mux: http.NewServeMux()}
+	s := &Server{store: st, svc: service.New(st, nil), logger: logger, mux: http.NewServeMux()}
 	s.routes()
+	ui.New(s.svc).Routes(s.mux)
 	return s
+}
+
+// SetBus attaches the event bus: the store publishes entity events, the
+// service publishes transition events, and GET /api/v1/events streams them.
+func (s *Server) SetBus(b *bus.Bus) {
+	s.bus = b
+	s.store.SetBus(b)
+	s.svc.SetBus(b)
 }
 
 // Handler returns the middleware-wrapped mux.
@@ -62,8 +76,12 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		// No WriteTimeout: GET /api/v1/events is a long-lived SSE stream
+		// by design (clients reconnect with cursors). Responses are
+		// size-bounded (1 MiB request cap, paginated lists), so a slow
+		// client can't hold unbounded memory.
+		WriteTimeout: 0,
+		IdleTimeout:  60 * time.Second,
 	}
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
@@ -82,6 +100,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /healthz", s.handleHealth)
 
 	m.HandleFunc("POST /api/v1/projects", s.handleCreateProject)
+	m.HandleFunc("GET /api/v1/projects", s.handleListProjects)
 	m.HandleFunc("GET /api/v1/projects/{key}", s.handleGetProject)
 	m.HandleFunc("POST /api/v1/projects/{key}/next-key", s.handleNextKey)
 
@@ -112,6 +131,13 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/work-items/{key}/transitions", s.handleListTransitions)
 	m.HandleFunc("POST /api/v1/work-items/{key}/transitions", s.handleTransition)
 	m.HandleFunc("GET /api/v1/work-items/{key}/evals", s.handleListEvalRuns)
+
+	m.HandleFunc("GET /api/v1/events", s.handleEvents)
+
+	m.HandleFunc("POST /api/v1/artifacts", s.handleCreateArtifact)
+	m.HandleFunc("GET /api/v1/artifacts", s.handleListArtifacts)
+	m.HandleFunc("GET /api/v1/artifacts/{id}", s.handleGetArtifact)
+	m.HandleFunc("GET /api/v1/artifacts/{id}/content", s.handleGetArtifactContent)
 }
 
 // --- middleware ---
@@ -153,6 +179,14 @@ type statusWriter struct {
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
+}
+
+// Flush forwards to the underlying writer so streaming handlers (SSE)
+// keep working through the middleware.
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // --- helpers ---
@@ -226,6 +260,17 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, p)
 }
 
+func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
+	projects, err := s.store.ListProjects(r.Context())
+	if !mapError(w, err) {
+		return
+	}
+	if projects == nil {
+		projects = []store.Project{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"projects": projects})
+}
+
 func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 	p, err := s.store.GetProject(r.Context(), r.PathValue("key"))
 	if !mapError(w, err) {
@@ -291,6 +336,7 @@ func (s *Server) handlePatchWorkItem(w http.ResponseWriter, r *http.Request) {
 	if !mapError(w, err) {
 		return
 	}
+	origStatus := cur.Status
 	cur.Version = patch.Version
 	if patch.Title != nil {
 		cur.Title = *patch.Title
@@ -322,8 +368,16 @@ func (s *Server) handlePatchWorkItem(w http.ResponseWriter, r *http.Request) {
 	// Status changes always go through the workflow engine: preconditions
 	// are checked and eval hooks run. This is the single choke point, so
 	// the workflow can't be bypassed with a raw PATCH.
-	updated, ok := s.applyStatusTransition(w, r, cur)
-	if !ok {
+	if patch.Status != nil && *patch.Status != origStatus {
+		updated, ok := s.applyStatusTransition(w, r, cur, *patch.Status)
+		if !ok {
+			return
+		}
+		writeJSON(w, http.StatusOK, updated)
+		return
+	}
+	updated, err := s.store.UpdateWorkItem(r.Context(), cur)
+	if !mapError(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)

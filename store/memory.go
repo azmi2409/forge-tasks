@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/azmi2409/forge-tasks/bus"
 )
 
 // MemoryStore is a concurrency-safe in-memory Store.
@@ -26,8 +28,27 @@ type MemoryStore struct {
 	workflows        map[string][]StoredWorkflow
 	projectWorkflows map[string]ProjectWorkflow
 	evalRuns         map[string]EvalRun
+	artifacts        map[string]Artifact
+	artifactBlobs    map[string][]byte
 	wfSeq            atomic.Int64
 	evalSeq          atomic.Int64
+	artifactSeq      atomic.Int64
+	eventBus         *bus.Bus
+}
+
+// SetBus attaches the event bus. Mutations publish events while the store
+// lock is held, so subscribers must never call back into the store.
+func (s *MemoryStore) SetBus(b *bus.Bus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.eventBus = b
+}
+
+// publish emits an event when a bus is attached.
+func (s *MemoryStore) publish(typ string, data any) {
+	if s.eventBus != nil {
+		s.eventBus.Publish(typ, data)
+	}
 }
 
 // NewMemoryStore returns an empty MemoryStore.
@@ -41,6 +62,8 @@ func NewMemoryStore() *MemoryStore {
 		workflows:        make(map[string][]StoredWorkflow),
 		projectWorkflows: make(map[string]ProjectWorkflow),
 		evalRuns:         make(map[string]EvalRun),
+		artifacts:        make(map[string]Artifact),
+		artifactBlobs:    make(map[string][]byte),
 	}
 	s.seedDefaultWorkflowLocked()
 	return s
@@ -64,7 +87,22 @@ func (s *MemoryStore) CreateProject(ctx context.Context, p Project) error {
 	s.projects[p.Key] = p
 	s.counters[p.Key] = &atomic.Int64{}
 	s.pinDefaultWorkflowLocked(p.Key)
+	s.publish(bus.TypeProjectCreated, p)
 	return nil
+}
+
+func (s *MemoryStore) ListProjects(ctx context.Context) ([]Project, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Project, 0, len(s.projects))
+	for _, p := range s.projects {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out, nil
 }
 
 func (s *MemoryStore) GetProject(ctx context.Context, key string) (Project, error) {
@@ -136,6 +174,7 @@ func (s *MemoryStore) CreateWorkItem(ctx context.Context, w WorkItem) (WorkItem,
 	stored.CreatedAt = now
 	stored.UpdatedAt = now
 	s.items[key] = stored
+	s.publish(bus.TypeWorkItemCreated, copyWorkItem(stored))
 	return copyWorkItem(stored), nil
 }
 
@@ -176,6 +215,7 @@ func (s *MemoryStore) UpdateWorkItem(ctx context.Context, w WorkItem) (WorkItem,
 	stored.CreatedAt = cur.CreatedAt
 	stored.UpdatedAt = time.Now().UTC()
 	s.items[w.Key] = stored
+	s.publish(bus.TypeWorkItemUpdated, copyWorkItem(stored))
 	return copyWorkItem(stored), nil
 }
 
@@ -190,6 +230,7 @@ func (s *MemoryStore) DeleteWorkItem(ctx context.Context, key string) error {
 	}
 	delete(s.items, key)
 	// Keys are never reallocated: the project counter keeps incrementing.
+	s.publish(bus.TypeWorkItemDeleted, map[string]any{"key": key})
 	return nil
 }
 

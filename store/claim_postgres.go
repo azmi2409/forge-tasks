@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/azmi2409/forge-tasks/bus"
 )
 
 // Postgres claim/lease implementation.
@@ -102,6 +104,7 @@ func (s *PostgresStore) Claim(ctx context.Context, agentID string, f WorkItemFil
 	}
 	c.ClaimedAt = c.ClaimedAt.UTC()
 	c.ExpiresAt = c.ExpiresAt.UTC()
+	s.publish(bus.TypeClaimCreated, c)
 	return w, c, nil
 }
 
@@ -146,6 +149,7 @@ func (s *PostgresStore) RenewClaim(ctx context.Context, key, agentID string, ttl
 	}
 	c.ClaimedAt = c.ClaimedAt.UTC()
 	c.ExpiresAt = c.ExpiresAt.UTC()
+	s.publish(bus.TypeClaimRenewed, c)
 	return c, nil
 }
 
@@ -176,7 +180,11 @@ func (s *PostgresStore) ReleaseClaim(ctx context.Context, key, agentID string) e
 		}
 		return fmt.Errorf("%w: %s held by %s", ErrClaimConflict, key, holder)
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	s.publish(bus.TypeClaimReleased, map[string]any{"key": key, "agent_id": agentID})
+	return nil
 }
 
 func (s *PostgresStore) GetClaim(ctx context.Context, key string) (Claim, error) {

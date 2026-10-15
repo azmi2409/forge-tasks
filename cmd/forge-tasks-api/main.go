@@ -19,6 +19,7 @@ import (
 	"syscall"
 
 	"github.com/azmi2409/forge-tasks/api"
+	"github.com/azmi2409/forge-tasks/bus"
 	"github.com/azmi2409/forge-tasks/store"
 )
 
@@ -58,6 +59,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	srv := api.NewServer(st, logger)
+	srv.SetBus(bus.New())
 	logger.Info("listening", "port", port)
 	return srv.Serve(ctx, ":"+port)
 }

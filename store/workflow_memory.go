@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/azmi2409/forge-tasks/bus"
 )
 
 // defaultWorkflowDef is the built-in workflow, mirrored in 003_workflows.sql.
@@ -51,6 +53,7 @@ func (s *MemoryStore) CreateWorkflow(ctx context.Context, name string, definitio
 		CreatedAt:  time.Now().UTC(),
 	}
 	s.workflows[id] = []StoredWorkflow{w}
+	s.publish(bus.TypeWorkflowCreated, w)
 	return w, nil
 }
 
@@ -75,6 +78,7 @@ func (s *MemoryStore) UpdateWorkflow(ctx context.Context, id string, definition 
 		CreatedAt:  time.Now().UTC(),
 	}
 	s.workflows[id] = append(versions, w)
+	s.publish(bus.TypeWorkflowUpdated, w)
 	return w, nil
 }
 
@@ -141,6 +145,7 @@ func (s *MemoryStore) SetProjectWorkflow(ctx context.Context, projectKey, workfl
 		WorkflowID: workflowID,
 		Version:    version,
 	}
+	s.publish(bus.TypeProjectWorkflowSet, s.projectWorkflows[projectKey])
 	return nil
 }
 
@@ -178,6 +183,7 @@ func (s *MemoryStore) RecordEvalRun(ctx context.Context, run EvalRun) (EvalRun, 
 	run.ID = newEvalRunID(s.evalSeq.Add(1))
 	run.RanAt = time.Now().UTC()
 	s.evalRuns[run.ID] = run
+	s.publish(bus.TypeEvalRunRecorded, run)
 	return run, nil
 }
 

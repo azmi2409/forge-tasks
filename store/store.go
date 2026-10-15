@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/azmi2409/forge-tasks/bus"
 )
 
 // Sentinel errors returned by Store implementations. Use errors.Is to match.
@@ -46,6 +48,8 @@ type Store interface {
 	CreateProject(ctx context.Context, p Project) error
 	// GetProject returns the project or ErrNotFound.
 	GetProject(ctx context.Context, key string) (Project, error)
+	// ListProjects returns all projects, ordered by key.
+	ListProjects(ctx context.Context) ([]Project, error)
 
 	// NextKey atomically allocates the next work-item key for a project
 	// (e.g. "FT-124"). Safe under concurrency; keys are never reused, even
@@ -111,4 +115,16 @@ type Store interface {
 	RecordEvalRun(ctx context.Context, run EvalRun) (EvalRun, error)
 	// ListEvalRuns returns a work item's eval history, newest first.
 	ListEvalRuns(ctx context.Context, workItemKey string) ([]EvalRun, error)
+
+	// SetBus attaches the event bus; mutations publish events. Nil detaches.
+	SetBus(b *bus.Bus)
+
+	// CreateArtifact stores a content-addressed, versioned artifact.
+	CreateArtifact(ctx context.Context, in ArtifactInput) (Artifact, error)
+	// GetArtifact returns one artifact's metadata (not its content).
+	GetArtifact(ctx context.Context, id string) (Artifact, error)
+	// GetArtifactContent returns the raw bytes of an artifact.
+	GetArtifactContent(ctx context.Context, id string) ([]byte, error)
+	// ListArtifacts returns artifact metadata, newest first.
+	ListArtifacts(ctx context.Context, f ArtifactFilter) ([]Artifact, error)
 }

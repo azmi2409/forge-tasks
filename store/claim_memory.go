@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/azmi2409/forge-tasks/bus"
 )
 
 // Memory claim/lease implementation. Expired leases are purged lazily inside
@@ -50,6 +52,7 @@ func (s *MemoryStore) Claim(ctx context.Context, agentID string, f WorkItemFilte
 			ExpiresAt:   now.Add(ttl),
 		}
 		s.claims[k] = c
+		s.publish(bus.TypeClaimCreated, c)
 		return copyWorkItem(w), c, nil
 	}
 	return WorkItem{}, Claim{}, ErrNoWorkAvailable
@@ -76,6 +79,7 @@ func (s *MemoryStore) RenewClaim(ctx context.Context, key, agentID string, ttl t
 	}
 	c.ExpiresAt = now.Add(ttl)
 	s.claims[key] = c
+	s.publish(bus.TypeClaimRenewed, c)
 	return c, nil
 }
 
@@ -94,6 +98,7 @@ func (s *MemoryStore) ReleaseClaim(ctx context.Context, key, agentID string) err
 		return fmt.Errorf("%w: %s held by %s", ErrClaimConflict, key, c.AgentID)
 	}
 	delete(s.claims, key)
+	s.publish(bus.TypeClaimReleased, map[string]any{"key": key, "agent_id": agentID})
 	return nil
 }
 

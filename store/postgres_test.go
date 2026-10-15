@@ -311,6 +311,52 @@ func TestPostgresWorkflows(t *testing.T) {
 	}
 }
 
+func TestPostgresArtifacts(t *testing.T) {
+	s, ctx := testPostgresDB(t)
+	if err := s.CreateProject(ctx, Project{Key: "FT", Name: "Forge"}); err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	item, err := s.CreateWorkItem(ctx, WorkItem{ProjectKey: "FT", Title: "task"})
+	if err != nil {
+		t.Fatalf("item: %v", err)
+	}
+	a1, err := s.CreateArtifact(ctx, ArtifactInput{
+		Kind: ArtifactTestReport, Name: "report.xml", WorkItemKey: item.Key,
+		Content:  []byte("<ok/>"),
+		Metadata: map[string]any{"status": "pass"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if a1.Version != 1 || a1.SHA256 == "" {
+		t.Fatalf("a1=%+v", a1)
+	}
+	if _, err := s.CreateArtifact(ctx, ArtifactInput{
+		Kind: "bogus", Name: "x", Content: []byte("x"),
+	}); err == nil {
+		t.Fatal("bad kind: got nil, want error")
+	}
+	a2, err := s.CreateArtifact(ctx, ArtifactInput{
+		Kind: ArtifactTestReport, Name: "report.xml", WorkItemKey: item.Key,
+		Content:  []byte("<ok2/>"),
+		Metadata: map[string]any{"status": "pass"},
+	})
+	if err != nil {
+		t.Fatalf("create2: %v", err)
+	}
+	if a2.Version != 2 {
+		t.Fatalf("a2=%+v", a2)
+	}
+	content, err := s.GetArtifactContent(ctx, a1.ID)
+	if err != nil || string(content) != "<ok/>" {
+		t.Fatalf("content=%q err=%v", content, err)
+	}
+	listed, err := s.ListArtifacts(ctx, ArtifactFilter{WorkItemKey: item.Key, Kind: ArtifactTestReport})
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("listed=%+v err=%v", listed, err)
+	}
+}
+
 func dbURLWithDB(t *testing.T, rawurl, db string) string {
 	t.Helper()
 	u, err := url.Parse(rawurl)

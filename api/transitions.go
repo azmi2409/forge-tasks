@@ -2,10 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/azmi2409/forge-tasks/service"
 	"github.com/azmi2409/forge-tasks/store"
 	"github.com/azmi2409/forge-tasks/workflow"
 )
@@ -113,103 +115,39 @@ func (s *Server) handleGetProjectWorkflow(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"pin": pw, "workflow": wf})
 }
 
-// --- transitions ---
-
-// loadWorkflow resolves the pinned, parsed workflow for an item's project.
-func (s *Server) loadWorkflow(r *http.Request, projectKey string) (workflow.Workflow, error) {
-	pw, err := s.store.GetProjectWorkflow(r.Context(), projectKey)
-	if err != nil {
-		return workflow.Workflow{}, err
-	}
-	sw, err := s.store.GetWorkflow(r.Context(), pw.WorkflowID, pw.Version)
-	if err != nil {
-		return workflow.Workflow{}, err
-	}
-	return sw.Parsed()
-}
-
-func criteriaView(item store.WorkItem) []workflow.Criterion {
-	out := make([]workflow.Criterion, 0, len(item.Acceptance))
-	for _, c := range item.Acceptance {
-		out = append(out, workflow.Criterion{ID: c.ID, Satisfied: c.Status == store.CriterionPassed})
-	}
-	return out
-}
+// --- transitions (thin adapters over the service layer) ---
 
 // writeBlocked answers "why can't I transition?" in machine-readable form.
-func writeBlocked(w http.ResponseWriter, result workflow.Result, evalRun *store.EvalRun) {
+func writeBlocked(w http.ResponseWriter, blocked *service.BlockedError) {
 	body := map[string]any{
-		"code":    result.BlockedCode,
-		"message": result.Message,
+		"code":    blocked.Result.BlockedCode,
+		"message": blocked.Result.Message,
 	}
-	if len(result.Missing) > 0 {
-		body["missing"] = result.Missing
+	if len(blocked.Result.Missing) > 0 {
+		body["missing"] = blocked.Result.Missing
 	}
-	if len(result.Available) > 0 {
-		body["available"] = result.Available
+	if len(blocked.Result.Available) > 0 {
+		body["available"] = blocked.Result.Available
 	}
-	if evalRun != nil {
-		body["eval_run"] = evalRun
+	if blocked.EvalRun != nil {
+		body["eval_run"] = blocked.EvalRun
 	}
 	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": body})
 }
 
-// runEvalGate executes the transition's eval hook (if any) and records the
-// run. A failing check is a *blocked transition*, not a server error.
-func (s *Server) runEvalGate(r *http.Request, item store.WorkItem, tr *workflow.Transition, dryRun bool) (*store.EvalRun, *workflow.Result) {
-	if tr.Eval == nil {
-		return nil, nil
+// mapTransitionError maps service.Transition errors to HTTP responses.
+// Returns true when the error was handled.
+func (s *Server) mapTransitionError(w http.ResponseWriter, err error) bool {
+	var blocked *service.BlockedError
+	if errors.As(err, &blocked) {
+		writeBlocked(w, blocked)
+		return true
 	}
-	res, err := workflow.RunEvalHook(r.Context(), *tr.Eval, workflow.EvalContext{
-		WorkItemKey: item.Key,
-		From:        item.Status,
-		To:          tr.To,
-	})
-	if err != nil {
-		// The check itself couldn't run: treat as blocked with reasons.
-		return nil, &workflow.Result{
-			BlockedCode: "eval_error",
-			Message:     "eval hook could not run: " + err.Error(),
-		}
-	}
-	recorded, err := s.store.RecordEvalRun(r.Context(), store.EvalRun{
-		WorkItemKey: item.Key,
-		Transition:  item.Status + "->" + tr.To,
-		HookName:    res.HookName,
-		Command:     res.Command,
-		Passed:      res.Passed && !res.TimedOut,
-		ExitCode:    res.ExitCode,
-		Output:      res.Output,
-		DurationMs:  res.Duration.Milliseconds(),
-		DryRun:      dryRun,
-	})
-	if err != nil {
-		return nil, &workflow.Result{
-			BlockedCode: "eval_error",
-			Message:     "could not record eval run: " + err.Error(),
-		}
-	}
-	if res.TimedOut {
-		return &recorded, &workflow.Result{
-			BlockedCode: "eval_timeout",
-			Message:     "eval hook timed out",
-		}
-	}
-	if !res.Passed {
-		return &recorded, &workflow.Result{
-			BlockedCode: "eval_failed",
-			Message:     "eval hook failed",
-		}
-	}
-	return &recorded, nil
+	return mapError(w, err)
 }
 
 func (s *Server) handleListTransitions(w http.ResponseWriter, r *http.Request) {
-	item, err := s.store.GetWorkItem(r.Context(), r.PathValue("key"))
-	if !mapError(w, err) {
-		return
-	}
-	wf, err := s.loadWorkflow(r, item.ProjectKey)
+	current, transitions, err := s.svc.AvailableTransitions(r.Context(), r.PathValue("key"))
 	if !mapError(w, err) {
 		return
 	}
@@ -218,15 +156,12 @@ func (s *Server) handleListTransitions(w http.ResponseWriter, r *http.Request) {
 		RequireCriteriaMet bool               `json:"require_criteria_met,omitempty"`
 		Eval               *workflow.EvalHook `json:"eval,omitempty"`
 	}
-	var out []tView
-	for _, tr := range wf.Available(item.Status) {
+	out := make([]tView, 0, len(transitions))
+	for _, tr := range transitions {
 		out = append(out, tView{To: tr.To, RequireCriteriaMet: tr.RequireCriteriaMet, Eval: tr.Eval})
 	}
-	if out == nil {
-		out = []tView{}
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"current":     item.Status,
+		"current":     current,
 		"transitions": out,
 	})
 }
@@ -253,40 +188,18 @@ func (s *Server) handleTransition(w http.ResponseWriter, r *http.Request) {
 	if !mapError(w, err) {
 		return
 	}
-	if req.Version != item.Version {
-		writeError(w, http.StatusConflict, "version_conflict",
-			"work item changed since it was read; GET it again and retry")
-		return
-	}
-	wf, err := s.loadWorkflow(r, item.ProjectKey)
-	if !mapError(w, err) {
-		return
-	}
-	result := wf.Evaluate(item.Status, req.To, criteriaView(item))
-	if !result.Allowed {
-		writeBlocked(w, result, nil)
-		return
-	}
-	evalRun, blocked := s.runEvalGate(r, item, result.Transition, req.DryRun)
-	if blocked != nil {
-		writeBlocked(w, *blocked, evalRun)
-		return
-	}
-	resp := map[string]any{"allowed": true, "transition": result.Transition}
-	if evalRun != nil {
-		resp["eval_run"] = evalRun
-	}
-	if req.DryRun {
-		writeJSON(w, http.StatusOK, resp)
-		return
-	}
-	item.Status = req.To
 	item.Version = req.Version
-	updated, err := s.store.UpdateWorkItem(r.Context(), item)
-	if !mapError(w, err) {
+	outcome, err := s.svc.Transition(r.Context(), item, req.To, req.DryRun)
+	if !s.mapTransitionError(w, err) {
 		return
 	}
-	resp["work_item"] = updated
+	resp := map[string]any{"allowed": true, "transition": outcome.Transition}
+	if outcome.EvalRun != nil {
+		resp["eval_run"] = outcome.EvalRun
+	}
+	if !outcome.DryRun {
+		resp["work_item"] = outcome.WorkItem
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -305,48 +218,12 @@ func (s *Server) handleListEvalRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 // applyStatusTransition runs the workflow gate for a PATCH-driven status
-// change. It evaluates preconditions and eval hooks against the updated
-// item, then persists it. Returns the updated item or writes the error.
-func (s *Server) applyStatusTransition(w http.ResponseWriter, r *http.Request, item store.WorkItem) (store.WorkItem, bool) {
-	orig, err := s.store.GetWorkItem(r.Context(), item.Key)
-	if !mapError(w, err) {
+// change. The sparse field updates are applied to the item first, then the
+// governed transition runs against that intended state.
+func (s *Server) applyStatusTransition(w http.ResponseWriter, r *http.Request, item store.WorkItem, newStatus string) (store.WorkItem, bool) {
+	outcome, err := s.svc.Transition(r.Context(), item, newStatus, false)
+	if !s.mapTransitionError(w, err) {
 		return store.WorkItem{}, false
 	}
-	// Stale writes lose before any workflow evaluation: a client with an
-	// old version has a stale view of the world, so transition advice
-	// would be meaningless. (UpdateWorkItem re-checks atomically at write.)
-	if item.Version != orig.Version {
-		writeError(w, http.StatusConflict, "version_conflict",
-			"work item changed since it was read; GET it again and retry")
-		return store.WorkItem{}, false
-	}
-	if item.Status == orig.Status {
-		// Not a transition; plain update.
-		updated, err := s.store.UpdateWorkItem(r.Context(), item)
-		if !mapError(w, err) {
-			return store.WorkItem{}, false
-		}
-		return updated, true
-	}
-	wf, err := s.loadWorkflow(r, item.ProjectKey)
-	if !mapError(w, err) {
-		return store.WorkItem{}, false
-	}
-	// Evaluate against the NEW item: a PATCH may satisfy criteria and
-	// transition in one call.
-	result := wf.Evaluate(orig.Status, item.Status, criteriaView(item))
-	if !result.Allowed {
-		writeBlocked(w, result, nil)
-		return store.WorkItem{}, false
-	}
-	evalRun, blocked := s.runEvalGate(r, item, result.Transition, false)
-	if blocked != nil {
-		writeBlocked(w, *blocked, evalRun)
-		return store.WorkItem{}, false
-	}
-	updated, err := s.store.UpdateWorkItem(r.Context(), item)
-	if !mapError(w, err) {
-		return store.WorkItem{}, false
-	}
-	return updated, true
+	return outcome.WorkItem, true
 }
