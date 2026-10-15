@@ -147,7 +147,7 @@ func (s *PostgresStore) CreateWorkItem(ctx context.Context, w WorkItem) (WorkIte
 		return WorkItem{}, &ValidationError{Field: "key", Message: "must start with project key prefix"}
 	}
 	applyDefaults(&w)
-	acceptance, err := json.Marshal(w.Acceptance)
+	acceptance, err := json.Marshal(nullIfNilSlice(w.Acceptance))
 	if err != nil {
 		return WorkItem{}, fmt.Errorf("store: marshal acceptance: %w", err)
 	}
@@ -163,7 +163,7 @@ func (s *PostgresStore) CreateWorkItem(ctx context.Context, w WorkItem) (WorkIte
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1)
 		RETURNING `+workItemColumns,
 		key, w.ProjectKey, w.Title, w.Description, w.IssueType, w.Status, w.Priority,
-		nullIfEmpty(w.AssigneeID), string(acceptance), w.Labels, string(custom),
+		nullIfEmpty(w.AssigneeID), string(acceptance), emptyStrings(w.Labels), string(custom),
 	).Scan(out.scan()...)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -203,7 +203,7 @@ func (s *PostgresStore) UpdateWorkItem(ctx context.Context, w WorkItem) (WorkIte
 	if err := w.Validate(); err != nil {
 		return WorkItem{}, err
 	}
-	acceptance, err := json.Marshal(w.Acceptance)
+	acceptance, err := json.Marshal(nullIfNilSlice(w.Acceptance))
 	if err != nil {
 		return WorkItem{}, fmt.Errorf("store: marshal acceptance: %w", err)
 	}
@@ -220,7 +220,7 @@ func (s *PostgresStore) UpdateWorkItem(ctx context.Context, w WorkItem) (WorkIte
 		WHERE key = $1 AND version = $11
 		RETURNING `+workItemColumns,
 		w.Key, w.Title, w.Description, w.IssueType, w.Status, w.Priority,
-		nullIfEmpty(w.AssigneeID), string(acceptance), w.Labels, string(custom),
+		nullIfEmpty(w.AssigneeID), string(acceptance), emptyStrings(w.Labels), string(custom),
 		w.Version,
 	).Scan(out.scan()...)
 	if err != nil {
@@ -339,7 +339,7 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, a AgentPrincipal) error
 			name = EXCLUDED.name, kind = EXCLUDED.kind,
 			capabilities = EXCLUDED.capabilities,
 			last_heartbeat = EXCLUDED.last_heartbeat`,
-		a.ID, a.Name, string(a.Kind), a.Capabilities, a.LastHeartbeat.UTC())
+		a.ID, a.Name, string(a.Kind), emptyStrings(a.Capabilities), a.LastHeartbeat.UTC())
 	if err != nil {
 		return fmt.Errorf("store: upsert agent: %w", err)
 	}
@@ -458,6 +458,24 @@ func nullIfNil(m map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	return m
+}
+
+// nullIfNilSlice normalizes a nil acceptance list to [] so the JSONB column
+// stores [] instead of null.
+func nullIfNilSlice(s []AcceptanceCriterion) []AcceptanceCriterion {
+	if s == nil {
+		return []AcceptanceCriterion{}
+	}
+	return s
+}
+
+// emptyStrings normalizes a nil string slice to []string{} because pgx
+// encodes nil slices as NULL, which violates NOT NULL columns.
+func emptyStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 func isNoRows(err error) bool { return err == pgx.ErrNoRows }
