@@ -56,7 +56,7 @@ func (s *PostgresStore) UpdateWorkflow(ctx context.Context, id string, definitio
 	var name string
 	var maxVersion int
 	err = tx.QueryRow(ctx,
-		`SELECT name, max(version) FROM workflows WHERE id = $1 GROUP BY name FOR UPDATE`,
+		`SELECT name, version FROM workflows WHERE id = $1 ORDER BY version DESC LIMIT 1 FOR UPDATE`,
 		id).Scan(&name, &maxVersion)
 	if err != nil {
 		if isNoRows(err) {
