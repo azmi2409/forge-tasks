@@ -12,6 +12,20 @@ Components in build order (component numbers kept stable):
       reference implementation, Postgres schema in
       `store/migrations/001_init.sql` (JSONB + GIN indexes, key_counters for
       atomic FT-N allocation). 12 tests green with `-race`.
+- [x] **Postgres adapter** — `store/postgres.go` (pgx/v5 + pgxpool): same
+      contract as MemoryStore, row-locked key allocation, optimistic updates,
+      `store/migrate.go` embeds the schema and `ApplyMigration` runs it on
+      boot. `TestPostgresStore` (isolated DB per run, skips without
+      `TEST_DATABASE_URL`) runs in CI against a Postgres service.
+- [x] **2. REST/JSON API** — `api/` package (stdlib `net/http` only): projects,
+      work items (CRUD + sparse PATCH with required version → 409 on stale),
+      filtered/paginated listing, agent upsert/get/heartbeat, `/healthz`;
+      JSON error envelope, request IDs, structured logging, 1 MiB body cap,
+      server timeouts. `cmd/forge-tasks-api` binary: `DATABASE_URL` selects
+      Postgres (schema auto-applied) else in-memory; graceful shutdown.
+      Smoke-tested live (create → patch → stale-409 → filtered list).
+      `Dockerfile` (multi-stage, static binary) + `api` service wired into
+      `docker-compose.yml`. 6 API handler tests green with `-race`.
 - [ ] **2. REST/JSON API** — issues, projects, workflows; CRUD + search
 - [ ] **3. Claim API + lease manager** — atomic claim/lease/heartbeat
       (`SELECT … FOR UPDATE SKIP LOCKED`)

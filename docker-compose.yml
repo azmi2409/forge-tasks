@@ -31,18 +31,23 @@ services:
       retries: 10
       start_period: 10s
 
-  # Component 2 (REST/JSON API) will plug in here, e.g.:
-  #
-  # api:
-  #   build: .
-  #   restart: unless-stopped
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #   environment:
-  #     DATABASE_URL: postgres://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@postgres:5432/${POSTGRES_DB:-forge_tasks}?sslmode=disable
-  #   ports:
-  #     - "${API_PORT:-8080}:8080"
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@postgres:5432/${POSTGRES_DB:-forge_tasks}?sslmode=disable
+      PORT: "8080"
+    ports:
+      - "${API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz | grep -q '\"status\":\"ok\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 volumes:
   pgdata:

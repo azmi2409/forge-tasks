@@ -9,6 +9,20 @@ jobs:
   build:
     name: build / vet / test
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: forge
+          POSTGRES_PASSWORD: forge
+          POSTGRES_DB: forge_tasks
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -35,3 +49,8 @@ jobs:
 
       - name: Test with race detector
         run: go test ./... -race -count=1
+
+      - name: Test Postgres adapter
+        env:
+          TEST_DATABASE_URL: postgres://forge:forge@localhost:5432/forge_tasks?sslmode=disable
+        run: go test ./store/ -run TestPostgres -v -count=1

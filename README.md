@@ -68,14 +68,55 @@ Postgres connection pool in production.
 ## Quickstart
 
 ```bash
-# Go 1.27+
+# Run everything (Postgres 16 + API)
+docker compose up -d
+
+# Or run the API locally against the store of your choice:
+go run ./cmd/forge-tasks-api                      # in-memory store
+DATABASE_URL=postgres://forge:forge@localhost:5432/forge_tasks?sslmode=disable \
+  go run ./cmd/forge-tasks-api                    # Postgres (schema auto-applied)
+
+# Tests (Go 1.27+)
 go test ./... -race
+```
+
+## API
+
+Base URL: `http://localhost:8080/api/v1` (`PORT` env overrides the port).
+
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| GET | `/healthz` | Liveness probe |
+| POST | `/projects` | Create a project |
+| GET | `/projects/{key}` | Get a project |
+| POST | `/projects/{key}/next-key` | Atomically allocate the next work-item key |
+| POST | `/work-items` | Create a work item (key auto-allocated) → `201` |
+| GET | `/work-items` | List with `?project=&status=&assignee=&issue_type=&labels=a,b&limit=&offset=` |
+| GET | `/work-items/{key}` | Get one |
+| PATCH | `/work-items/{key}` | Sparse update; `version` required → `409` on stale write |
+| DELETE | `/work-items/{key}` | Delete (key never reused) → `204` |
+| PUT | `/agents/{id}` | Create/replace an agent principal |
+| GET | `/agents/{id}` | Get an agent principal |
+| POST | `/agents/{id}/heartbeat` | Record liveness (`{"at": "..."}` optional) |
+
+Errors are `{"error": {"code": "...", "message": "..."}}` with codes
+`not_found` (404), `already_exists` / `version_conflict` (409),
+`validation_error` / `bad_request` (400).
+
+```bash
+curl -X POST localhost:8080/api/v1/projects \
+  -d '{"key":"FT","name":"Forge Tasks"}'
+curl -X POST localhost:8080/api/v1/work-items \
+  -d '{"project_key":"FT","title":"Ship it","labels":["backend"]}'
+# → {"key":"FT-1", ... "version":1}
+curl -X PATCH localhost:8080/api/v1/work-items/FT-1 \
+  -d '{"version":1,"status":"doing"}'
 ```
 
 ## Deploy
 
 ```bash
-docker compose up -d   # Postgres 16 + schema, ready for the API
+docker compose up -d   # Postgres 16 + API, schema auto-applied
 ```
 
 See [docs/DEPLOY.md](docs/DEPLOY.md).
@@ -84,8 +125,10 @@ See [docs/DEPLOY.md](docs/DEPLOY.md).
 
 - `store/` — component 1: the issue store. Domain types (`WorkItem`,
   `AcceptanceCriterion`, `AgentPrincipal`, `Project`), the `Store` interface,
-  a concurrency-safe in-memory reference implementation, and the Postgres
-  schema in `store/migrations/001_init.sql`.
+  a concurrency-safe in-memory reference implementation, the pgx Postgres
+  adapter, and the schema in `store/migrations/001_init.sql`.
+- `api/` — component 2: the REST/JSON API (stdlib only).
+- `cmd/forge-tasks-api/` — the API server binary.
 - `docs/rea-jira.md` — the Jira reverse-engineering analysis.
 - `docs/images/` — README artwork.
 
@@ -106,8 +149,8 @@ See [docs/DEPLOY.md](docs/DEPLOY.md).
 
 Eight components, in build order (see `TODO.md`):
 
-1. Issue store ✅
-2. REST/JSON API
+1. Issue store ✅ (incl. Postgres adapter)
+2. REST/JSON API ✅
 3. Claim API + lease manager
 4. Workflow engine + eval hooks
 5. MCP server
