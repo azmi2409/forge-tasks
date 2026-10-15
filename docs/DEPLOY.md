@@ -7,24 +7,46 @@ cp .env.example .env   # optional — defaults work out of the box
 docker compose up -d
 ```
 
-This starts Postgres 16 with the issue-store schema applied automatically on
-first boot (`store/migrations/001_init.sql` is mounted into
-`/docker-entrypoint-initdb.d`; the migration is idempotent).
+This starts Postgres 16 and the API service (REST + SSE event stream + web
+UI on `:8080`). The API applies the embedded schema migrations on every boot
+(`store/migrations/`: 001 issues, 002 claims, 003 workflows, 004 artifacts);
+they are idempotent, so restarts and upgrades are safe.
 
 Verify:
 
 ```bash
+curl -s localhost:8080/healthz
+# {"status":"ok"}
+
 docker compose exec postgres psql -U forge -d forge_tasks -c '\dt'
-# expect: agents, key_counters, projects, work_items
+# expect: agents, artifact_blobs, artifacts, claims, eval_runs,
+#         key_counters, project_workflows, projects,
+#         workflow_versions, workflows, work_items
 ```
 
-Connection string for the future API service:
+What runs where:
+
+| URL | What |
+| --- | ---- |
+| `http://localhost:8080/` | Web UI (human dashboard + item detail) |
+| `http://localhost:8080/api/v1/...` | REST API (JSON) |
+| `http://localhost:8080/api/v1/events` | SSE event stream |
+
+The MCP server speaks stdio, so it isn't a long-lived service — run it
+attached against the same database:
+
+```bash
+docker compose run --rm mcp
+# or point any MCP client at it:
+# { "command": "docker", "args": ["compose", "run", "--rm", "mcp"] }
+```
+
+Connection string (matches `DATABASE_URL` inside the compose network;
+replace user/password/host when you set your own `.env`):
 
 ```
 postgres://forge:forge@postgres:5432/forge_tasks?sslmode=disable
 ```
-
-(Replace user/password/host when you set your own `.env`.)
 
 Tear down (keeps the data volume):
 
@@ -46,3 +68,8 @@ docker compose down -v
   partial index on assignee, and a `key_counters` table for atomic key
   allocation. Run one Postgres per region close to your API instances and
   scale the API horizontally — the store is stateless apart from the DB.
+- Everything is currently unauthenticated (single-trust-domain MVP). Put the
+  API behind your auth proxy / VPN before exposing it.
+- The SSE stream holds one long-lived connection per subscriber; size your
+  reverse proxy's idle timeouts accordingly (no response `WriteTimeout` is
+  set server-side by design).

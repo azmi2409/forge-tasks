@@ -1,13 +1,24 @@
-# forge-tasks — local / single-host deployment.
+# forge-tasks — local / single-host deployment (all 8 components).
 #
 # Usage:
 #   cp .env.example .env   # optional; sane defaults are built in
 #   docker compose up -d
 #
-# This starts Postgres with the issue-store schema (component 1) applied
-# automatically on first boot via /docker-entrypoint-initdb.d.
-# The API service (component 2) plugs into the commented block below once
-# it exists.
+# This starts:
+#   postgres — Postgres 16, data in the pgdata volume.
+#   api      — REST API + SSE event stream + web UI on :8080. Applies the
+#              embedded schema migrations (001 issues, 002 claims,
+#              003 workflows, 004 artifacts) on every boot; they are
+#              idempotent, so upgrades are safe.
+#
+# The MCP server (stdio transport) is not a long-lived service — run it
+# attached when you need it:
+#   docker compose run --rm mcp
+#
+# Endpoints once up:
+#   http://localhost:8080/                web UI
+#   http://localhost:8080/api/v1/...      REST API
+#   http://localhost:8080/api/v1/events   SSE stream
 
 services:
   postgres:
@@ -15,15 +26,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-forge}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-forge}
+      POSTGRES_PASSWORD: <redacted>
       POSTGRES_DB: ${POSTGRES_DB:-forge_tasks}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # Applies store/migrations/001_init.sql on first container init.
-      # The migration is idempotent (IF NOT EXISTS / OR REPLACE throughout).
-      - ./store/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-forge} -d ${POSTGRES_DB:-forge_tasks}"]
       interval: 5s
@@ -32,13 +40,15 @@ services:
       start_period: 10s
 
   api:
-    build: .
+    build:
+      context: .
+      target: api
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@postgres:5432/${POSTGRES_DB:-forge_tasks}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@postgres:5432/${POSTGRES_DB:-forge_tasks}?sslmode=<redacted>
       PORT: "8080"
     ports:
       - "${API_PORT:-8080}:8080"
@@ -48,6 +58,19 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+
+  # MCP server over stdio. Not started by `up`; attach with `run`.
+  mcp:
+    build:
+      context: .
+      target: mcp
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@postgres:5432/${POSTGRES_DB:-forge_tasks}?sslmode=<redacted>
+    stdin_open: true
+    profiles: ["tools"]
 
 volumes:
   pgdata:

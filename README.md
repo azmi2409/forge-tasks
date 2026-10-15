@@ -73,8 +73,14 @@ are all thin adapters over it.
 ## Quickstart
 
 ```bash
-# Run everything (Postgres 16 + API)
+# Run everything (Postgres 16 + API: REST, SSE, and web UI)
 docker compose up -d
+# → web UI at      http://localhost:8080/
+# → REST API at    http://localhost:8080/api/v1
+# → event stream at http://localhost:8080/api/v1/events
+
+# MCP server (stdio) against the same database:
+docker compose run --rm mcp
 
 # Or run the API locally against the store of your choice:
 go run ./cmd/forge-tasks-api                      # in-memory store
