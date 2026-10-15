@@ -70,6 +70,20 @@ side of the mapping changes; the container still listens on 8080 internally,
 so the healthcheck keeps working. Same trick applies to Postgres
 (`POSTGRES_PORT`) if 5432 is taken.
 
+`DATABASE_URL` is built from `POSTGRES_USER` / `POSTGRES_PASSWORD` /
+`POSTGRES_DB` by default. If your password contains URL-reserved characters
+(`@`, `:`, `/`, `?`, `#` — note `#` also truncates values in `.env` files),
+skip the interpolation and set the full URL yourself, percent-encoded:
+
+```bash
+DATABASE_URL=postgres://forge:p%40ss%3Aword@postgres:5432/forge_tasks?sslmode=disable
+```
+
+When `DATABASE_URL` is set explicitly it wins; the constructed default is
+only a fallback. Without any `DATABASE_URL` the API silently runs on the
+in-memory store, so always double-check the variable resolved if your data
+looks empty after a deploy.
+
 ## Production notes
 
 - Put Postgres behind your private network; don't expose 5432 publicly.
