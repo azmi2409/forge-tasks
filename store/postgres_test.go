@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestPostgresStore exercises the pgx adapter against a real Postgres.
@@ -15,8 +16,9 @@ import (
 //
 //	TEST_DATABASE_URL=postgres://forge:forge@localhost:5432/forge_tasks?sslmode=disable go test ./store/ -run TestPostgres
 //
-// Without TEST_DATABASE_URL the test skips.
-func TestPostgresStore(t *testing.T) {
+// Without TEST_DATABASE_URL the tests skip.
+func testPostgresDB(t *testing.T) (*PostgresStore, context.Context) {
+	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("TEST_DATABASE_URL not set; skipping Postgres adapter test")
@@ -39,13 +41,13 @@ func TestPostgresStore(t *testing.T) {
 		t.Fatalf("create db: %v", err)
 	}
 	admin.Close()
-	defer func() {
+	t.Cleanup(func() {
 		admin, _ := NewPostgresStore(ctx, url)
 		if admin != nil {
 			admin.pool.Exec(ctx, `DROP DATABASE IF EXISTS `+dbName)
 			admin.Close()
 		}
-	}()
+	})
 
 	testURL := dbURLWithDB(t, url, dbName)
 	if err := ApplyMigration(ctx, testURL); err != nil {
@@ -55,7 +57,12 @@ func TestPostgresStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect migrated: %v", err)
 	}
-	defer s.Close()
+	t.Cleanup(s.Close)
+	return s, ctx
+}
+
+func TestPostgresStore(t *testing.T) {
+	s, ctx := testPostgresDB(t)
 
 	if err := s.CreateProject(ctx, Project{Key: "FT", Name: "Forge Tasks"}); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -165,6 +172,79 @@ func TestPostgresStore(t *testing.T) {
 	}
 	if _, err := s.GetWorkItem(ctx, w.Key); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("get deleted: got %v, want ErrNotFound", err)
+	}
+}
+
+func TestPostgresClaims(t *testing.T) {
+	s, ctx := testPostgresDB(t)
+	if err := s.CreateProject(ctx, Project{Key: "FT", Name: "Forge"}); err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	for _, id := range []string{"agent-1", "agent-2"} {
+		if err := s.UpsertAgent(ctx, AgentPrincipal{ID: id, Name: id, Kind: AgentKindAgent}); err != nil {
+			t.Fatalf("agent: %v", err)
+		}
+	}
+	if _, err := s.CreateWorkItem(ctx, WorkItem{ProjectKey: "FT", Title: "task"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	w, c, err := s.Claim(ctx, "agent-1", WorkItemFilter{}, time.Minute)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if w.Key != "FT-1" || c.AgentID != "agent-1" {
+		t.Fatalf("claim=%+v item=%+v", c, w)
+	}
+	// Second claim finds nothing: SKIP LOCKED + lease row exclude it.
+	if _, _, err := s.Claim(ctx, "agent-2", WorkItemFilter{}, time.Minute); !errors.Is(err, ErrNoWorkAvailable) {
+		t.Fatalf("double claim: got %v, want ErrNoWorkAvailable", err)
+	}
+	// Renew/ownership rules.
+	if _, err := s.RenewClaim(ctx, "FT-1", "agent-2", time.Minute); !errors.Is(err, ErrClaimConflict) {
+		t.Fatalf("renew wrong agent: got %v, want ErrClaimConflict", err)
+	}
+	if _, err := s.RenewClaim(ctx, "FT-1", "agent-1", 10*time.Minute); err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	if err := s.ReleaseClaim(ctx, "FT-1", "agent-1"); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if _, _, err := s.Claim(ctx, "agent-2", WorkItemFilter{}, time.Minute); err != nil {
+		t.Fatalf("re-claim: %v", err)
+	}
+
+	// Concurrent race: exactly one winner across connections.
+	if _, err := s.CreateWorkItem(ctx, WorkItem{ProjectKey: "FT", Title: "race"}); err != nil {
+		t.Fatalf("create race item: %v", err)
+	}
+	const n = 16
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	wins := 0
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			agent := "agent-1"
+			if i%2 == 1 {
+				agent = "agent-2"
+			}
+			_, _, err := s.Claim(ctx, agent, WorkItemFilter{}, time.Minute)
+			mu.Lock()
+			defer mu.Unlock()
+			if err == nil {
+				wins++
+			} else if !errors.Is(err, ErrNoWorkAvailable) {
+				t.Errorf("unexpected: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	// FT-1 is still leased to agent-2; only FT-2 is free, so exactly one
+	// of the 16 racers can win.
+	if wins != 1 {
+		t.Fatalf("race wins=%d, want 1", wins)
 	}
 }
 

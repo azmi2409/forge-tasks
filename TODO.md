@@ -26,9 +26,16 @@ Components in build order (component numbers kept stable):
       Smoke-tested live (create → patch → stale-409 → filtered list).
       `Dockerfile` (multi-stage, static binary) + `api` service wired into
       `docker-compose.yml`. 6 API handler tests green with `-race`.
-- [ ] **2. REST/JSON API** — issues, projects, workflows; CRUD + search
-- [ ] **3. Claim API + lease manager** — atomic claim/lease/heartbeat
-      (`SELECT … FOR UPDATE SKIP LOCKED`)
+- [x] **3. Claim API + lease manager** — `store.Claim` (atomic pick-one:
+      `SELECT … FOR UPDATE SKIP LOCKED` on Postgres, mutex + deterministic
+      lowest-key pick on memory), lease TTL (default 5m, max 24h) with
+      heartbeat renew, release, lazy expiry of dead leases (no reaper
+      process needed). Endpoints: `POST /claims` (201 with claimed item /
+      204 when the queue is empty), `GET /claims/{key}`,
+      `DELETE /claims/{key}?agent_id=`, `POST /claims/{key}/renew`,
+      `GET /agents/{id}/claims`; ownership enforced (409 `claim_conflict`).
+      Migration `002_claims.sql`. 32-agent memory race + 16-goroutine
+      Postgres race: exactly 1 winner, losers get 204.
 - [ ] **4. Workflow engine + eval hooks** — versioned statecharts; eval hooks
       gate terminal transitions
 - [ ] **5. MCP server** — ~12 typed tools, thin wrapper over the service layer

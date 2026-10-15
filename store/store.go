@@ -74,4 +74,19 @@ type Store interface {
 	GetAgent(ctx context.Context, id string) (AgentPrincipal, error)
 	// Heartbeat records agent liveness. Unknown IDs return ErrNotFound.
 	Heartbeat(ctx context.Context, id string, at time.Time) error
+
+	// Claim atomically assigns one available work item to agentID for ttl.
+	// "Available" means: matches f (empty Status means DefaultClaimableStatus)
+	// and not held by an unexpired claim. The agent must exist.
+	// Returns ErrNoWorkAvailable when nothing matches right now.
+	Claim(ctx context.Context, agentID string, f WorkItemFilter, ttl time.Duration) (WorkItem, Claim, error)
+	// RenewClaim extends the caller's lease. The agent must hold the claim;
+	// otherwise ErrNotFound (no claim) or ErrClaimConflict (someone else's).
+	RenewClaim(ctx context.Context, key, agentID string, ttl time.Duration) (Claim, error)
+	// ReleaseClaim frees the caller's lease early. Same ownership rules as renew.
+	ReleaseClaim(ctx context.Context, key, agentID string) error
+	// GetClaim returns the active (unexpired) claim or ErrNotFound.
+	GetClaim(ctx context.Context, key string) (Claim, error)
+	// ListClaims returns the agent's active claims, ordered by expiry.
+	ListClaims(ctx context.Context, agentID string) ([]Claim, error)
 }

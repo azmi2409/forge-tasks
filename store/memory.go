@@ -22,6 +22,7 @@ type MemoryStore struct {
 	items    map[string]WorkItem
 	agents   map[string]AgentPrincipal
 	counters map[string]*atomic.Int64 // per-project key counters
+	claims   map[string]Claim         // work item key -> active lease
 }
 
 // NewMemoryStore returns an empty MemoryStore.
@@ -31,6 +32,7 @@ func NewMemoryStore() *MemoryStore {
 		items:    make(map[string]WorkItem),
 		agents:   make(map[string]AgentPrincipal),
 		counters: make(map[string]*atomic.Int64),
+		claims:   make(map[string]Claim),
 	}
 }
 

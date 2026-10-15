@@ -98,6 +98,11 @@ Base URL: `http://localhost:8080/api/v1` (`PORT` env overrides the port).
 | PUT | `/agents/{id}` | Create/replace an agent principal |
 | GET | `/agents/{id}` | Get an agent principal |
 | POST | `/agents/{id}/heartbeat` | Record liveness (`{"at": "..."}` optional) |
+| POST | `/claims` | Atomically claim one work item (lease); `201` + item, or `204` when empty |
+| GET | `/claims/{key}` | Get the active lease |
+| DELETE | `/claims/{key}?agent_id=` | Release the lease early |
+| POST | `/claims/{key}/renew` | Extend the lease (heartbeat) |
+| GET | `/agents/{id}/claims` | List the agent's active leases |
 
 Errors are `{"error": {"code": "...", "message": "..."}}` with codes
 `not_found` (404), `already_exists` / `version_conflict` (409),
@@ -151,7 +156,7 @@ Eight components, in build order (see `TODO.md`):
 
 1. Issue store ✅ (incl. Postgres adapter)
 2. REST/JSON API ✅
-3. Claim API + lease manager
+3. Claim API + lease manager ✅
 4. Workflow engine + eval hooks
 5. MCP server
 6. Event bus + SSE

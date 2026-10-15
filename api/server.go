@@ -94,6 +94,12 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /api/v1/agents/{id}", s.handleUpsertAgent)
 	m.HandleFunc("GET /api/v1/agents/{id}", s.handleGetAgent)
 	m.HandleFunc("POST /api/v1/agents/{id}/heartbeat", s.handleHeartbeat)
+
+	m.HandleFunc("POST /api/v1/claims", s.handleClaim)
+	m.HandleFunc("GET /api/v1/claims/{key}", s.handleGetClaim)
+	m.HandleFunc("DELETE /api/v1/claims/{key}", s.handleReleaseClaim)
+	m.HandleFunc("POST /api/v1/claims/{key}/renew", s.handleRenewClaim)
+	m.HandleFunc("GET /api/v1/agents/{id}/claims", s.handleListClaims)
 }
 
 // --- middleware ---
@@ -166,6 +172,8 @@ func mapError(w http.ResponseWriter, err error) bool {
 	case errors.Is(err, store.ErrVersionConflict):
 		writeError(w, http.StatusConflict, "version_conflict",
 			"work item changed since it was read; GET it again and retry")
+	case errors.Is(err, store.ErrClaimConflict):
+		writeError(w, http.StatusConflict, "claim_conflict", err.Error())
 	default:
 		var ve *store.ValidationError
 		if errors.As(err, &ve) {
@@ -369,6 +377,113 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, a)
+}
+
+// --- claims ---
+
+// claimRequest asks for one work item lease.
+type claimRequest struct {
+	AgentID    string       `json:"agent_id"`
+	TTLSeconds *int64       `json:"ttl_seconds,omitempty"` // default DefaultClaimTTL
+	Filter     *claimFilter `json:"filter,omitempty"`
+}
+
+type claimFilter struct {
+	Project   string   `json:"project,omitempty"`
+	Status    string   `json:"status,omitempty"`
+	IssueType string   `json:"issue_type,omitempty"`
+	Labels    []string `json:"labels,omitempty"`
+}
+
+func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
+	var req claimRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.AgentID) == "" {
+		writeError(w, http.StatusBadRequest, "validation_error", "agent_id: required")
+		return
+	}
+	ttl := store.DefaultClaimTTL
+	if req.TTLSeconds != nil {
+		ttl = time.Duration(*req.TTLSeconds) * time.Second
+	}
+	var f store.WorkItemFilter
+	if req.Filter != nil {
+		f = store.WorkItemFilter{
+			ProjectKey: req.Filter.Project,
+			Status:     req.Filter.Status,
+			IssueType:  req.Filter.IssueType,
+			Labels:     req.Filter.Labels,
+		}
+	}
+	item, claim, err := s.store.Claim(r.Context(), req.AgentID, f, ttl)
+	if errors.Is(err, store.ErrNoWorkAvailable) {
+		// Empty queue is normal for poll loops, not an error.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if !mapError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"claim":     claim,
+		"work_item": item,
+	})
+}
+
+func (s *Server) handleGetClaim(w http.ResponseWriter, r *http.Request) {
+	c, err := s.store.GetClaim(r.Context(), r.PathValue("key"))
+	if !mapError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+func (s *Server) handleReleaseClaim(w http.ResponseWriter, r *http.Request) {
+	agentID := r.URL.Query().Get("agent_id")
+	if strings.TrimSpace(agentID) == "" {
+		writeError(w, http.StatusBadRequest, "validation_error", "agent_id query param: required")
+		return
+	}
+	if err := s.store.ReleaseClaim(r.Context(), r.PathValue("key"), agentID); !mapError(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleRenewClaim(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AgentID    string `json:"agent_id"`
+		TTLSeconds *int64 `json:"ttl_seconds,omitempty"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.AgentID) == "" {
+		writeError(w, http.StatusBadRequest, "validation_error", "agent_id: required")
+		return
+	}
+	ttl := store.DefaultClaimTTL
+	if req.TTLSeconds != nil {
+		ttl = time.Duration(*req.TTLSeconds) * time.Second
+	}
+	c, err := s.store.RenewClaim(r.Context(), r.PathValue("key"), req.AgentID, ttl)
+	if !mapError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+func (s *Server) handleListClaims(w http.ResponseWriter, r *http.Request) {
+	claims, err := s.store.ListClaims(r.Context(), r.PathValue("id"))
+	if !mapError(w, err) {
+		return
+	}
+	if claims == nil {
+		claims = []store.Claim{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"claims": claims})
 }
 
 func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
