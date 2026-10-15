@@ -7,9 +7,19 @@ structured tasks with machine-readable acceptance criteria, agents are
 first-class principals that claim and lease work, and the primary interface is
 an MCP server — not a human UI.
 
-> Status: early. This repo currently holds the reverse-engineering analysis of
-> Jira the design is based on (`docs/rea-jira.md`), plus the build roadmap.
-> Code comes next.
+> Status: building. Component 1 (issue store) is done — see below. The
+> reverse-engineering analysis of Jira the design is based on is in
+> `docs/rea-jira.md`; the full roadmap is in `TODO.md`.
+
+## Layout
+
+- `store/` — component 1: the issue store. Domain types (`WorkItem`,
+  `AcceptanceCriterion`, `AgentPrincipal`, `Project`), the `Store` interface,
+  a concurrency-safe in-memory reference implementation, and the Postgres
+  schema in `store/migrations/001_init.sql`.
+- `docs/rea-jira.md` — the Jira reverse-engineering analysis.
+
+Run the tests: `go test ./... -race` (Go 1.27+).
 
 ## Why not just use Jira?
 

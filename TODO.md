@@ -1,9 +1,17 @@
 # TODO — forge-tasks build plan
 
+Stack: **Go** (chosen 2026-10-15 for massive concurrent AI-agent load;
+single static binary, goroutine-per-connection concurrency, pgx for Postgres).
+Go 1.27.2 toolchain lives at `~/go` (persistent across VM refreshes).
+
 Components in build order (component numbers kept stable):
 
-- [ ] **1. Issue store** — Postgres + JSONB; work items, structured acceptance
-      criteria, agent principals
+- [x] **1. Issue store** — `store/` package: WorkItem / AcceptanceCriterion /
+      AgentPrincipal / Project domain types, Store interface (context-aware,
+      optimistic concurrency via Version), concurrency-safe MemoryStore
+      reference implementation, Postgres schema in
+      `store/migrations/001_init.sql` (JSONB + GIN indexes, key_counters for
+      atomic FT-N allocation). 12 tests green with `-race`.
 - [ ] **2. REST/JSON API** — issues, projects, workflows; CRUD + search
 - [ ] **3. Claim API + lease manager** — atomic claim/lease/heartbeat
       (`SELECT … FOR UPDATE SKIP LOCKED`)
