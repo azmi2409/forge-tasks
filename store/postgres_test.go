@@ -24,6 +24,11 @@ func TestPostgresStore(t *testing.T) {
 	ctx := context.Background()
 	dbName := fmt.Sprintf("forge_test_%d", os.Getpid())
 
+	// The service database starts empty; migrate it first so the admin
+	// connection (which verifies schema presence) succeeds.
+	if err := ApplyMigration(ctx, url); err != nil {
+		t.Fatalf("migrate service db: %v", err)
+	}
 	// Create an isolated database per run so parallel CI jobs never clash.
 	admin, err := NewPostgresStore(ctx, url)
 	if err != nil {
