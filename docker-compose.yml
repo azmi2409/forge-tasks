@@ -1,0 +1,48 @@
+# forge-tasks — local / single-host deployment.
+#
+# Usage:
+#   cp .env.example .env   # optional; sane defaults are built in
+#   docker compose up -d
+#
+# This starts Postgres with the issue-store schema (component 1) applied
+# automatically on first boot via /docker-entrypoint-initdb.d.
+# The API service (component 2) plugs into the commented block below once
+# it exists.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-forge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-forge}
+      POSTGRES_DB: ${POSTGRES_DB:-forge_tasks}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Applies store/migrations/001_init.sql on first container init.
+      # The migration is idempotent (IF NOT EXISTS / OR REPLACE throughout).
+      - ./store/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-forge} -d ${POSTGRES_DB:-forge_tasks}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # Component 2 (REST/JSON API) will plug in here, e.g.:
+  #
+  # api:
+  #   build: .
+  #   restart: unless-stopped
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   environment:
+  #     DATABASE_URL: postgres://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@postgres:5432/${POSTGRES_DB:-forge_tasks}?sslmode=disable
+  #   ports:
+  #     - "${API_PORT:-8080}:8080"
+
+volumes:
+  pgdata:

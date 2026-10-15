@@ -72,6 +72,14 @@ Postgres connection pool in production.
 go test ./... -race
 ```
 
+## Deploy
+
+```bash
+docker compose up -d   # Postgres 16 + schema, ready for the API
+```
+
+See [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Layout
 
 - `store/` — component 1: the issue store. Domain types (`WorkItem`,
