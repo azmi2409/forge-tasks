@@ -100,6 +100,18 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/v1/claims/{key}", s.handleReleaseClaim)
 	m.HandleFunc("POST /api/v1/claims/{key}/renew", s.handleRenewClaim)
 	m.HandleFunc("GET /api/v1/agents/{id}/claims", s.handleListClaims)
+
+	m.HandleFunc("POST /api/v1/workflows", s.handleCreateWorkflow)
+	m.HandleFunc("GET /api/v1/workflows", s.handleListWorkflows)
+	m.HandleFunc("GET /api/v1/workflows/{id}", s.handleGetWorkflow)
+	m.HandleFunc("GET /api/v1/workflows/{id}/versions/{version}", s.handleGetWorkflow)
+	m.HandleFunc("PUT /api/v1/workflows/{id}", s.handleUpdateWorkflow)
+	m.HandleFunc("PUT /api/v1/projects/{key}/workflow", s.handleSetProjectWorkflow)
+	m.HandleFunc("GET /api/v1/projects/{key}/workflow", s.handleGetProjectWorkflow)
+
+	m.HandleFunc("GET /api/v1/work-items/{key}/transitions", s.handleListTransitions)
+	m.HandleFunc("POST /api/v1/work-items/{key}/transitions", s.handleTransition)
+	m.HandleFunc("GET /api/v1/work-items/{key}/evals", s.handleListEvalRuns)
 }
 
 // --- middleware ---
@@ -307,8 +319,11 @@ func (s *Server) handlePatchWorkItem(w http.ResponseWriter, r *http.Request) {
 	if patch.CustomFields != nil {
 		cur.CustomFields = *patch.CustomFields
 	}
-	updated, err := s.store.UpdateWorkItem(r.Context(), cur)
-	if !mapError(w, err) {
+	// Status changes always go through the workflow engine: preconditions
+	// are checked and eval hooks run. This is the single choke point, so
+	// the workflow can't be bypassed with a raw PATCH.
+	updated, ok := s.applyStatusTransition(w, r, cur)
+	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)

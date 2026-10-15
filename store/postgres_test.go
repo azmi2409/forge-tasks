@@ -248,6 +248,69 @@ func TestPostgresClaims(t *testing.T) {
 	}
 }
 
+func TestPostgresWorkflows(t *testing.T) {
+	s, ctx := testPostgresDB(t)
+	if err := s.CreateProject(ctx, Project{Key: "FT", Name: "Forge"}); err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	// Project auto-pinned to the seeded default workflow.
+	pw, err := s.GetProjectWorkflow(ctx, "FT")
+	if err != nil {
+		t.Fatalf("pin: %v", err)
+	}
+	if pw.WorkflowID != "default" || pw.Version != 1 {
+		t.Fatalf("pw=%+v", pw)
+	}
+	if _, err := s.GetWorkflow(ctx, "default", 1); err != nil {
+		t.Fatalf("default: %v", err)
+	}
+	if _, err := s.CreateWorkflow(ctx, "bad", badWorkflowDef); err == nil {
+		t.Fatal("bad definition: got nil, want error")
+	}
+	w, err := s.CreateWorkflow(ctx, "Kanban", testWorkflowDef)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	w2, err := s.UpdateWorkflow(ctx, w.ID, testWorkflowDef)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if w2.Version != 2 {
+		t.Fatalf("w2=%+v", w2)
+	}
+	latest, err := s.GetWorkflow(ctx, w.ID, 0)
+	if err != nil || latest.Version != 2 {
+		t.Fatalf("latest=%+v err=%v", latest, err)
+	}
+	if err := s.SetProjectWorkflow(ctx, "FT", w.ID, 2); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	pw, err = s.GetProjectWorkflow(ctx, "FT")
+	if err != nil || pw.Version != 2 {
+		t.Fatalf("pw=%+v err=%v", pw, err)
+	}
+
+	// Eval runs round-trip.
+	item, err := s.CreateWorkItem(ctx, WorkItem{ProjectKey: "FT", Title: "task"})
+	if err != nil {
+		t.Fatalf("create item: %v", err)
+	}
+	r, err := s.RecordEvalRun(ctx, EvalRun{
+		WorkItemKey: item.Key, Transition: "doing->done", HookName: "smoke",
+		Command: "true", Passed: true, Output: "ok",
+	})
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if r.ID == "" || r.RanAt.IsZero() {
+		t.Fatalf("r=%+v", r)
+	}
+	runs, err := s.ListEvalRuns(ctx, item.Key)
+	if err != nil || len(runs) != 1 || runs[0].ID != r.ID {
+		t.Fatalf("runs=%+v err=%v", runs, err)
+	}
+}
+
 func dbURLWithDB(t *testing.T, rawurl, db string) string {
 	t.Helper()
 	u, err := url.Parse(rawurl)

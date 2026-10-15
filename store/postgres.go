@@ -88,6 +88,13 @@ func (s *PostgresStore) CreateProject(ctx context.Context, p Project) error {
 		p.Key); err != nil {
 		return fmt.Errorf("store: seed counter: %w", err)
 	}
+	// New projects start on the built-in workflow (component 5).
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO project_workflows (project_key, workflow_id, workflow_version)
+		 VALUES ($1, 'default', 1)`,
+		p.Key); err != nil {
+		return fmt.Errorf("store: pin default workflow: %w", err)
+	}
 	return tx.Commit(ctx)
 }
 

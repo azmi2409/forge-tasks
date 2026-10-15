@@ -17,23 +17,33 @@ import (
 // per-project atomic key counters, optimistic-concurrency updates, and
 // never-reused keys.
 type MemoryStore struct {
-	mu       sync.RWMutex
-	projects map[string]Project
-	items    map[string]WorkItem
-	agents   map[string]AgentPrincipal
-	counters map[string]*atomic.Int64 // per-project key counters
-	claims   map[string]Claim         // work item key -> active lease
+	mu               sync.RWMutex
+	projects         map[string]Project
+	items            map[string]WorkItem
+	agents           map[string]AgentPrincipal
+	counters         map[string]*atomic.Int64 // per-project key counters
+	claims           map[string]Claim         // work item key -> active lease
+	workflows        map[string][]StoredWorkflow
+	projectWorkflows map[string]ProjectWorkflow
+	evalRuns         map[string]EvalRun
+	wfSeq            atomic.Int64
+	evalSeq          atomic.Int64
 }
 
 // NewMemoryStore returns an empty MemoryStore.
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{
-		projects: make(map[string]Project),
-		items:    make(map[string]WorkItem),
-		agents:   make(map[string]AgentPrincipal),
-		counters: make(map[string]*atomic.Int64),
-		claims:   make(map[string]Claim),
+	s := &MemoryStore{
+		projects:         make(map[string]Project),
+		items:            make(map[string]WorkItem),
+		agents:           make(map[string]AgentPrincipal),
+		counters:         make(map[string]*atomic.Int64),
+		claims:           make(map[string]Claim),
+		workflows:        make(map[string][]StoredWorkflow),
+		projectWorkflows: make(map[string]ProjectWorkflow),
+		evalRuns:         make(map[string]EvalRun),
 	}
+	s.seedDefaultWorkflowLocked()
+	return s
 }
 
 // Compile-time contract check.
@@ -53,6 +63,7 @@ func (s *MemoryStore) CreateProject(ctx context.Context, p Project) error {
 	}
 	s.projects[p.Key] = p
 	s.counters[p.Key] = &atomic.Int64{}
+	s.pinDefaultWorkflowLocked(p.Key)
 	return nil
 }
 

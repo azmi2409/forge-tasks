@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -89,4 +90,25 @@ type Store interface {
 	GetClaim(ctx context.Context, key string) (Claim, error)
 	// ListClaims returns the agent's active claims, ordered by expiry.
 	ListClaims(ctx context.Context, agentID string) ([]Claim, error)
+
+	// CreateWorkflow stores version 1 of a new workflow. The definition is
+	// validated by the workflow engine before storage.
+	CreateWorkflow(ctx context.Context, name string, definition json.RawMessage) (StoredWorkflow, error)
+	// UpdateWorkflow stores a new immutable version of an existing workflow.
+	UpdateWorkflow(ctx context.Context, id string, definition json.RawMessage) (StoredWorkflow, error)
+	// GetWorkflow returns one version; version 0 means the latest.
+	GetWorkflow(ctx context.Context, id string, version int) (StoredWorkflow, error)
+	// ListWorkflows returns the latest version of every workflow.
+	ListWorkflows(ctx context.Context) ([]StoredWorkflow, error)
+	// SetProjectWorkflow pins a project to a workflow version.
+	SetProjectWorkflow(ctx context.Context, projectKey, workflowID string, version int) error
+	// GetProjectWorkflow returns the pinned workflow, or ErrNotFound when
+	// the project has none (projects created by CreateProject always do).
+	GetProjectWorkflow(ctx context.Context, projectKey string) (ProjectWorkflow, error)
+
+	// RecordEvalRun persists one eval-hook execution. The store assigns ID
+	// and RanAt; the caller's values are ignored.
+	RecordEvalRun(ctx context.Context, run EvalRun) (EvalRun, error)
+	// ListEvalRuns returns a work item's eval history, newest first.
+	ListEvalRuns(ctx context.Context, workItemKey string) ([]EvalRun, error)
 }
