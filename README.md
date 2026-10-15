@@ -4,7 +4,9 @@
 [![Go](https://img.shields.io/badge/go-1.27-blue)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Jira, rebuilt for AI agents.
+![forge-tasks: AI agents collaborating on a task board](docs/images/hero.png)
+
+**Jira, rebuilt for AI agents.**
 
 An open-source project management system designed agent-first: work items are
 structured tasks with machine-readable acceptance criteria, agents are
@@ -14,16 +16,6 @@ an MCP server — not a human UI.
 > Status: building. Component 1 (issue store) is done — see below. The
 > reverse-engineering analysis of Jira the design is based on is in
 > `docs/rea-jira.md`; the full roadmap is in `TODO.md`.
-
-## Layout
-
-- `store/` — component 1: the issue store. Domain types (`WorkItem`,
-  `AcceptanceCriterion`, `AgentPrincipal`, `Project`), the `Store` interface,
-  a concurrency-safe in-memory reference implementation, and the Postgres
-  schema in `store/migrations/001_init.sql`.
-- `docs/rea-jira.md` — the Jira reverse-engineering analysis.
-
-Run the tests: `go test ./... -race` (Go 1.27+).
 
 ## Why not just use Jira?
 
@@ -37,6 +29,57 @@ The REA found Jira's model fights agents at every step:
   issues" — so agents do N+1 loops client-side. Bulk ops cap at 1,000.
 - **"Done" is a status, not a checkable predicate** — acceptance criteria live
   in unstructured blobs; nothing verifies them.
+
+## How it works
+
+![An agent's work passes through the eval gate before it counts as done](docs/images/eval-gate.png)
+
+An agent claims a work item, executes it, and the acceptance criteria are
+evaluated by machine — tests run, commands exit 0, files exist. Only when every
+criterion passes does the item move to done. No faith-based status updates.
+
+```mermaid
+flowchart LR
+    A[Agent claims work] --> B[Executes task]
+    B --> C{Eval hooks}
+    C -->|all criteria pass| D[Done]
+    C -->|criterion fails| B
+```
+
+## Architecture
+
+```mermaid
+flowchart TB
+    Agent[AI agents] <--> MCP[MCP server]
+    Agent <--> API[REST/JSON API]
+    MCP --> Store[(Issue store)]
+    API --> Store
+    Claim[Claim API + lease manager] --> Store
+    WF[Workflow engine + eval hooks] --> Store
+    Store --> Events[Event bus + SSE]
+    Store --> Artifacts[(Artifact storage)]
+    UI[Minimal web UI] --> API
+```
+
+Built for massive concurrent agent load: optimistic concurrency on every write,
+atomic per-project key allocation, context-aware store interface backed by a
+Postgres connection pool in production.
+
+## Quickstart
+
+```bash
+# Go 1.27+
+go test ./... -race
+```
+
+## Layout
+
+- `store/` — component 1: the issue store. Domain types (`WorkItem`,
+  `AcceptanceCriterion`, `AgentPrincipal`, `Project`), the `Store` interface,
+  a concurrency-safe in-memory reference implementation, and the Postgres
+  schema in `store/migrations/001_init.sql`.
+- `docs/rea-jira.md` — the Jira reverse-engineering analysis.
+- `docs/images/` — README artwork.
 
 ## The design
 
@@ -55,7 +98,7 @@ The REA found Jira's model fights agents at every step:
 
 Eight components, in build order (see `TODO.md`):
 
-1. Issue store (Postgres + JSONB)
+1. Issue store ✅
 2. REST/JSON API
 3. Claim API + lease manager
 4. Workflow engine + eval hooks
