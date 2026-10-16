@@ -28,14 +28,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-forge}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-forge}
       POSTGRES_DB: ${POSTGRES_DB:-forge_tasks}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
       - forge
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-forge} -d ${POSTGRES_DB:-forge_tasks}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-forge} -d${POSTGRES_DB:-forge_tasks}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -50,8 +48,10 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@postgres:5432/${POSTGRES_DB:-forge_tasks}?sslmode=disable}
+      DATABASE_URL: postgres://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@postgres:5432/${POSTGRES_DB:-forge_tasks}?sslmode=disable
       PORT: "8080"
+    expose:
+      - "8080"
     ports:
       - "${API_PORT:-8080}:8080"
     networks:
@@ -72,7 +72,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@postgres:5432/${POSTGRES_DB:-forge_tasks}?sslmode=disable}
+      DATABASE_URL: postgres://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD:-forge}@postgres:5432/${POSTGRES_DB:-forge_tasks}?sslmode=disable
     stdin_open: true
     profiles: ["tools"]
     networks:
