@@ -70,19 +70,17 @@ side of the mapping changes; the container still listens on 8080 internally,
 so the healthcheck keeps working. Same trick applies to Postgres
 (`POSTGRES_PORT`) if 5432 is taken.
 
-`DATABASE_URL` is built from `POSTGRES_USER` / `POSTGRES_PASSWORD` /
-`POSTGRES_DB` by default. If your password contains URL-reserved characters
-(`@`, `:`, `/`, `?`, `#` — note `#` also truncates values in `.env` files),
-skip the interpolation and set the full URL yourself, percent-encoded:
+`DATABASE_URL` is assembled from `POSTGRES_USER` / `POSTGRES_PASSWORD` /
+`POSTGRES_DB` with plain (non-nested) variable defaults — nested
+`${OUTER:-...${INNER}...}` syntax is intentionally avoided because Coolify's
+parser closes the outer expression at the first `}` and corrupts the URL.
+Keep passwords URL-safe (letters, numbers, `-`, `_`): characters like `@`,
+`:`, `/`, `?`, `#` break the assembled URL, and `#` also truncates values in
+`.env` files.
 
-```bash
-DATABASE_URL=postgres://forge:p%40ss%3Aword@postgres:5432/forge_tasks?sslmode=disable
-```
-
-When `DATABASE_URL` is set explicitly it wins; the constructed default is
-only a fallback. Without any `DATABASE_URL` the API silently runs on the
-in-memory store, so always double-check the variable resolved if your data
-looks empty after a deploy.
+Without any `DATABASE_URL` the API silently runs on the in-memory store, so
+always double-check the variable resolved if your data looks empty after a
+deploy.
 
 ## Production notes
 
