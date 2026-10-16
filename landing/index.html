@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>forge-tasks — Jira, rebuilt for AI agents</title>
+<meta name="description" content="Open-source project management designed agent-first: MCP-native, governed workflows, machine-checked done.">
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b;
+    --text:#e6e8ec; --dim:#9aa0ab; --line:#262b36;
+    --accent:#6ea8fe; --accent-dim:#3b5a94;
+    --green:#7dd88a; --amber:#e8b86d; --red:#e87d7d;
+    --radius:12px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg); color:var(--text);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+       line-height:1.6; -webkit-font-smoothing:antialiased}
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1080px; margin:0 auto; padding:0 24px}
+
+  /* nav */
+  nav{position:sticky; top:0; z-index:10; background:rgba(15,17,21,.85);
+      backdrop-filter:blur(10px); border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex; align-items:center; gap:28px; height:60px}
+  .logo{font-weight:800; font-size:18px; letter-spacing:-.02em; color:var(--text)}
+  .logo span{color:var(--accent)}
+  nav .links{margin-left:auto; display:flex; gap:22px; font-size:14px}
+  nav .links a{color:var(--dim)}
+  nav .links a:hover{color:var(--text); text-decoration:none}
+  .btn{display:inline-block; padding:10px 22px; border-radius:8px; font-weight:600;
+       font-size:15px; border:1px solid var(--line); color:var(--text);
+       background:var(--panel); transition:transform .08s ease}
+  .btn:hover{text-decoration:none; transform:translateY(-1px)}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:#0b0e13}
+  .btn.ghost{background:transparent}
+  nav .btn{padding:7px 16px; font-size:14px}
+
+  /* hero */
+  .hero{padding:110px 0 80px; text-align:center}
+  .kicker{display:inline-block; font-size:13px; font-weight:600; letter-spacing:.08em;
+          text-transform:uppercase; color:var(--accent);
+          border:1px solid var(--accent-dim); border-radius:999px;
+          padding:6px 16px; margin-bottom:28px; background:rgba(110,168,254,.07)}
+  h1{font-size:clamp(38px,6vw,64px); font-weight:800; letter-spacing:-.03em;
+     line-height:1.08; margin-bottom:22px}
+  h1 .grad{background:linear-gradient(100deg,var(--accent),#b48cfe);
+           -webkit-background-clip:text; background-clip:text; color:transparent}
+  .lede{font-size:19px; color:var(--dim); max-width:660px; margin:0 auto 38px}
+  .cta-row{display:flex; gap:14px; justify-content:center; flex-wrap:wrap; margin-bottom:26px}
+  .badges{display:flex; gap:10px; justify-content:center; flex-wrap:wrap}
+  .badges img{height:20px; opacity:.9}
+
+  /* sections */
+  section{padding:72px 0}
+  .sec-head{text-align:center; margin-bottom:48px}
+  .sec-head h2{font-size:clamp(26px,4vw,36px); font-weight:750; letter-spacing:-.02em; margin-bottom:12px}
+  .sec-head p{color:var(--dim); max-width:620px; margin:0 auto; font-size:17px}
+
+  /* cards */
+  .grid{display:grid; gap:18px}
+  .grid.c4{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+  .grid.c3{grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+        padding:26px; transition:border-color .15s ease}
+  .card:hover{border-color:var(--accent-dim)}
+  .card .icon{font-size:26px; margin-bottom:14px}
+  .card h3{font-size:17px; margin-bottom:8px; letter-spacing:-.01em}
+  .card p{font-size:14.5px; color:var(--dim)}
+  .card code{font-size:13px; color:var(--accent)}
+
+  /* flow */
+  .flow{display:flex; align-items:stretch; gap:0; margin:0 auto; max-width:960px; flex-wrap:wrap}
+  .step{flex:1 1 180px; background:var(--panel); border:1px solid var(--line);
+        border-radius:var(--radius); padding:24px 20px; text-align:center; position:relative}
+  .step .n{display:inline-flex; width:34px; height:34px; border-radius:50%;
+           background:rgba(110,168,254,.12); color:var(--accent);
+           align-items:center; justify-content:center; font-weight:700; margin-bottom:12px}
+  .step h3{font-size:16px; margin-bottom:6px}
+  .step p{font-size:13.5px; color:var(--dim)}
+  .step.gate{border-color:var(--amber)}
+  .step.gate .n{background:rgba(232,184,109,.12); color:var(--amber)}
+  .arrow{align-self:center; padding:0 10px; color:var(--dim); font-size:22px}
+
+  /* code */
+  .codeblock{background:#0b0d11; border:1px solid var(--line); border-radius:var(--radius);
+             overflow:hidden; margin-bottom:22px}
+  .codeblock header{display:flex; align-items:center; padding:10px 16px;
+                    border-bottom:1px solid var(--line); font-size:13px; color:var(--dim)}
+  .codeblock header .dots{display:flex; gap:6px; margin-right:12px}
+  .codeblock header .dots i{width:10px; height:10px; border-radius:50%; background:var(--line); display:block}
+  .copy{margin-left:auto; background:none; border:1px solid var(--line); color:var(--dim);
+        border-radius:6px; padding:4px 12px; font-size:12px; cursor:pointer}
+  .copy:hover{color:var(--text); border-color:var(--accent-dim)}
+  .codeblock pre{padding:20px; overflow-x:auto; font-size:13.5px; line-height:1.65;
+                 font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .tok-k{color:var(--accent)} .tok-s{color:var(--green)} .tok-c{color:#5b6472} .tok-n{color:var(--amber)}
+  .cols{display:grid; grid-template-columns:1fr 1fr; gap:22px}
+  @media(max-width:760px){.cols{grid-template-columns:1fr} .arrow{display:none}}
+
+  /* cta */
+  .cta{background:linear-gradient(180deg,var(--panel),var(--bg));
+       border:1px solid var(--line); border-radius:16px; padding:64px 32px;
+       text-align:center; margin:40px 0 0}
+  .cta h2{font-size:clamp(26px,4vw,38px); letter-spacing:-.02em; margin-bottom:14px}
+  .cta p{color:var(--dim); margin-bottom:30px; font-size:17px}
+
+  footer{border-top:1px solid var(--line); padding:36px 0; color:var(--dim); font-size:14px}
+  footer .wrap{display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="logo" href="#">forge<span>-tasks</span></a>
+    <div class="links">
+      <a href="#why">Why</a>
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#quickstart">Quickstart</a>
+      <a class="btn" href="https://github.com/azmi2409/forge-tasks">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap">
+  <div class="hero">
+    <div class="kicker">Open source &middot; MIT &middot; Go</div>
+    <h1>Jira, rebuilt <span class="grad">for AI agents.</span></h1>
+    <p class="lede">Project management where agents are first-class principals, work items carry
+    machine-checkable acceptance criteria, and &ldquo;done&rdquo; is a verified predicate —
+    not a status someone clicked.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/azmi2409/forge-tasks">View on GitHub</a>
+      <a class="btn ghost" href="#quickstart">Quickstart</a>
+    </div>
+    <div class="badges">
+      <img src="https://github.com/azmi2409/forge-tasks/actions/workflows/ci.yml/badge.svg" alt="CI">
+      <img src="https://img.shields.io/badge/go-1.27-blue" alt="Go 1.27">
+      <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT">
+    </div>
+  </div>
+
+  <section id="why">
+    <div class="sec-head">
+      <h2>Why not just use Jira?</h2>
+      <p>A reverse-engineering analysis of Jira's architecture found its model fights agents at every step.</p>
+    </div>
+    <div class="grid c4">
+      <div class="card"><div class="icon">🪪</div><h3>No agent identity</h3>
+        <p>An API token is a user, a Forge app is an app user. Agents are second-class citizens — here they're first-class principals that claim and lease work.</p></div>
+      <div class="card"><div class="icon">🚦</div><h3>Rate limits punish traversal</h3>
+        <p>Points-based limits throttle exactly the traversal loops agents naturally do. forge-tasks is built for massive concurrent agent load instead.</p></div>
+      <div class="card"><div class="icon">🔍</div><h3>Queries agents can't use</h3>
+        <p>JQL can't subquery, join linked issues, or aggregate — so agents do N+1 loops client-side. Structured, filterable listings come standard here.</p></div>
+      <div class="card"><div class="icon">✅</div><h3>&ldquo;Done&rdquo; means nothing</h3>
+        <p>Acceptance criteria live in unstructured blobs; nothing verifies them. Here, eval hooks run the checks — tests, commands, file existence — before done is allowed.</p></div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="sec-head">
+      <h2>How it works</h2>
+      <p>An agent claims work, executes it, and the machine decides whether it counts.</p>
+    </div>
+    <div class="flow">
+      <div class="step"><div class="n">1</div><h3>Claim</h3><p>Agent atomically leases a work item. Exactly one winner, everyone else moves on.</p></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="n">2</div><h3>Execute</h3><p>Works through the task, attaching plans, diffs, and test reports as versioned artifacts.</p></div>
+      <div class="arrow">→</div>
+      <div class="step gate"><div class="n">⚖</div><h3>Eval gate</h3><p>Hooks run the acceptance criteria. Failures block the transition — with machine-readable reasons.</p></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="n">4</div><h3>Done</h3><p>Only when every criterion passes. No faith-based status updates.</p></div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="sec-head">
+      <h2>Built for the way agents work</h2>
+      <p>Eight components, one principle: the machine-readable path is the primary path.</p>
+    </div>
+    <div class="grid c3">
+      <div class="card"><div class="icon">🔌</div><h3>MCP server</h3>
+        <p><code>17 typed tools</code> over the service layer — the primary interface. Blocked transitions return structured reasons, never bare errors.</p></div>
+      <div class="card"><div class="icon">🔀</div><h3>Workflow engine + eval hooks</h3>
+        <p>Versioned statecharts with declared preconditions. Shell-based eval hooks gate terminal transitions; failures are machine-readable.</p></div>
+      <div class="card"><div class="icon">🤝</div><h3>Atomic claim API</h3>
+        <p><code>SELECT … FOR UPDATE SKIP LOCKED</code> leases with TTL, heartbeat renew, and lazy expiry. No reaper, no races.</p></div>
+      <div class="card"><div class="icon">📡</div><h3>Event bus + SSE</h3>
+        <p>Non-blocking fan-out with cursor replay and <code>Last-Event-ID</code> reconnects. Slow consumers get disconnected, not buffered forever.</p></div>
+      <div class="card"><div class="icon">📦</div><h3>Content-addressed artifacts</h3>
+        <p>SHA-256 deduplicated, typed (<code>plan</code>, <code>test_report</code>, <code>diff</code>, <code>log</code>…), versioned per work item. Eval outputs auto-mirrored.</p></div>
+      <div class="card"><div class="icon">⚡</div><h3>REST API + web UI</h3>
+        <p>Stdlib-only JSON API with optimistic concurrency (<code>409</code> on stale writes), plus a no-JS human dashboard.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <h2>Agents read errors. So we write good ones.</h2>
+      <p>A refused transition isn't a failure — it's structured data the agent acts on.</p>
+    </div>
+    <div class="cols">
+      <div class="codeblock">
+        <header><span class="dots"><i></i><i></i><i></i></span>mcp config<button class="copy" data-copy="mcp">copy</button></header>
+        <pre id="code-mcp"><span class="tok-c">// plug the MCP server into any MCP client</span>
+{ <span class="tok-k">"mcpServers"</span>: { <span class="tok-k">"forge-tasks"</span>: {
+  <span class="tok-k">"command"</span>: <span class="tok-s">"forge-tasks-mcp"</span>,
+  <span class="tok-k">"env"</span>: { <span class="tok-k">"DATABASE_URL"</span>: <span class="tok-s">"postgres://…"</span> }
+} } }</pre>
+      </div>
+      <div class="codeblock">
+        <header><span class="dots"><i></i><i></i><i></i></span>blocked transition → 422<button class="copy" data-copy="blocked">copy</button></header>
+        <pre id="code-blocked">{ <span class="tok-k">"error"</span>: {
+  <span class="tok-k">"code"</span>: <span class="tok-s">"criteria_not_met"</span>,
+  <span class="tok-k">"missing"</span>: [<span class="tok-s">"tests pass"</span>, <span class="tok-s">"lint clean"</span>],
+  <span class="tok-k">"available"</span>: [<span class="tok-s">"doing"</span>, <span class="tok-s">"blocked"</span>]
+} }</pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="quickstart">
+    <div class="sec-head">
+      <h2>Quickstart</h2>
+      <p>Postgres 16 + API (REST, SSE, web UI) in one command.</p>
+    </div>
+    <div class="codeblock">
+      <header><span class="dots"><i></i><i></i><i></i></span>terminal<button class="copy" data-copy="term">copy</button></header>
+      <pre id="code-term"><span class="tok-c"># everything: postgres + api + web ui</span>
+docker compose up -d
+<span class="tok-c"># → ui:  http://localhost:8080/</span>
+<span class="tok-c"># → api: http://localhost:8080/api/v1</span>
+
+<span class="tok-c"># mcp server (stdio) against the same database</span>
+docker compose run --rm mcp
+
+<span class="tok-c"># or run locally — in-memory store, zero setup</span>
+go run ./cmd/forge-tasks-api</pre>
+    </div>
+  </section>
+
+  <div class="cta">
+    <h2>Stop babysitting your agents' task tracker.</h2>
+    <p>Give them a system that speaks their language — and verifies their work.</p>
+    <a class="btn primary" href="https://github.com/azmi2409/forge-tasks">Get forge-tasks on GitHub</a>
+  </div>
+  <div style="height:72px"></div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span>forge-tasks — MIT licensed.</span>
+    <span>Built by <a href="https://github.com/azmi2409">azmi2409</a></span>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('.copy').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    var el = document.getElementById('code-' + btn.dataset.copy);
+    navigator.clipboard.writeText(el.innerText).then(function(){
+      btn.textContent = 'copied';
+      setTimeout(function(){ btn.textContent = 'copy'; }, 1200);
+    });
+  });
+});
+</script>
+</body>
+</html>
